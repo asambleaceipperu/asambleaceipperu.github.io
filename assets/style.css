@@ -461,3 +461,7 @@ footer .brand-text small{color:#b8cbb2}
 @media (max-width:900px){.productos,.pasos-fila{grid-template-columns:1fr}}
 @media (max-width:720px){.tallas{grid-template-columns:repeat(3,minmax(0,1fr))}.fila-campos .talla{width:130px}}
 @media (max-width:1240px) and (min-width:901px){.header nav a{font-size:14px;padding:8px 6px}.brand-text strong{font-size:19px}}
+.productos .precio{font-family:var(--display);font-weight:800;font-stretch:78%;font-size:44px;line-height:1;color:var(--papel);margin:0 0 8px}
+.leg-precio{font-family:var(--texto);font-weight:400;font-size:15px;color:var(--gris);margin-left:6px}
+.resumen-cab{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.resumen .total{font-family:var(--display);font-weight:800;font-stretch:80%;font-size:30px;color:var(--pizarra)}

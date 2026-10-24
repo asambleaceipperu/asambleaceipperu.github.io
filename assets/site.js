@@ -45,52 +45,62 @@ if(contactForm){
   });
 }
 
-/* Formulario de pedidos: arma un resumen legible, calcula la rifa y envía la reserva a Formspree. */
+/* Formulario de pedidos: resumen y total en vivo; envío a la hoja de Google (si está configurada) o, si no, a Formspree. */
 const pedidoForm=document.querySelector('#pedido-form');
 if(pedidoForm){
   const config=window.ASAMBLEA_CONTACTO||{};
-  const listo=typeof config.endpoint==='string'&&/^https:\/\/formspree\.io\/f\/[a-zA-Z0-9]+$/.test(config.endpoint)&&config.privacidadRevisada===true;
+  const hoja=typeof config.pedidos==='string'&&/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(config.pedidos)?config.pedidos:'';
+  const formspree=typeof config.endpoint==='string'&&/^https:\/\/formspree\.io\/f\/[a-zA-Z0-9]+$/.test(config.endpoint)&&config.privacidadRevisada===true?config.endpoint:'';
   const enviar=document.querySelector('#ped-enviar');const estado=document.querySelector('#ped-estado');
   const vista=document.querySelector('#ped-vista');const cantidades=[...pedidoForm.querySelectorAll('input[data-producto]')];
   const euros=n=>n.toLocaleString('es-ES')+' €';
-  function lineas(){
-    const out=[];
-    const cam=cantidades.filter(i=>i.dataset.producto==='Camiseta'&&+i.value>0);
-    if(cam.length)out.push('Camisetas: '+cam.map(i=>`${+i.value} × ${i.dataset.detalle}`).join(', '));
-    const ch=document.querySelector('#chapas');
-    if(+ch.value>0){const m=document.querySelector('#chapas-modelos').value.trim();out.push(`Chapas: ${+ch.value}`+(m?` (modelos: ${m})`:''));}
-    const r=document.querySelector('#rifa-n');
-    if(+r.value>0)out.push(`Rifa: ${+r.value} participaciones (${euros(+r.value*5)})`);
-    return out;
+  const num=i=>Math.max(0,Math.min(50,Math.floor(+i.value||0)));
+  function calcular(){
+    const out=[];let total=0;
+    const cam=cantidades.filter(i=>i.dataset.producto==='Camiseta'&&num(i)>0);
+    const nCam=cam.reduce((a,i)=>a+num(i),0);
+    if(nCam){out.push(`Camisetas: ${cam.map(i=>`${num(i)} × ${i.dataset.detalle}`).join(', ')} (${euros(nCam*10)})`);total+=nCam*10;}
+    const ch=num(document.querySelector('#chapas'));
+    if(ch){const m=document.querySelector('#chapas-modelos').value.trim();out.push(`Chapas: ${ch}${m?` (modelos: ${m})`:''} (${euros(ch*2)})`);total+=ch*2;}
+    const r=num(document.querySelector('#rifa-n'));
+    if(r){out.push(`Rifa: ${r} participaciones (${euros(r*5)})`);total+=r*5;}
+    return {lineas:out,total};
   }
   function actualizar(){
-    cantidades.forEach(i=>{const v=Math.max(0,Math.min(50,Math.floor(+i.value||0)));if(String(v)!==i.value&&i.value!=='')i.value=v;});
-    document.querySelector('#rifa-importe').textContent=euros((+document.querySelector('#rifa-n').value||0)*5);
-    const l=lineas();
-    vista.querySelector('p').innerHTML='';
-    if(!l.length){vista.querySelector('p').textContent='Todavía no has elegido nada.';return l;}
-    l.forEach((t,k)=>{if(k)vista.querySelector('p').append(document.createElement('br'));vista.querySelector('p').append(t);});
-    return l;
+    cantidades.forEach(i=>{if(i.value!==''&&String(num(i))!==i.value)i.value=num(i);});
+    const {lineas,total}=calcular();const p=vista.querySelector('p');p.replaceChildren();
+    document.querySelector('#ped-total').textContent=euros(total);
+    if(!lineas.length)p.textContent='Todavía no has elegido nada.';
+    else lineas.forEach((t,k)=>{if(k)p.append(document.createElement('br'));p.append(t);});
+    return {lineas,total};
   }
   pedidoForm.addEventListener('input',actualizar);
-  if(listo){enviar.disabled=false;}else{estado.textContent='Las reservas todavía no están activas. Escríbenos a asambleaceipperu@gmail.com.';}
+  if(hoja||formspree)enviar.disabled=false;else estado.textContent='Las reservas todavía no están activas. Escríbenos a asambleaceipperu@gmail.com.';
   pedidoForm.addEventListener('submit',async ev=>{
     ev.preventDefault();
-    const l=actualizar();
-    if(!l.length){estado.textContent='Elige al menos una camiseta, una chapa o una participación.';return;}
+    const {lineas,total}=actualizar();
+    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una chapa o una participación.';return;}
     for(const id of ['#ped-nombre','#ped-email','#ped-privacidad']){const el=document.querySelector(id);if(!el.checkValidity()){el.reportValidity();return;}}
     const ref='P-'+new Date().toISOString().slice(5,10).replace('-','')+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
     document.querySelector('#ped-ref').value=ref;
-    document.querySelector('#ped-resumen').value=l.join('\n');
-    document.querySelector('#ped-asunto').value=`Pedido ${ref} · ${document.querySelector('#ped-nombre').value.trim()}`;
-    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),20000);
+    document.querySelector('#ped-resumen').value=lineas.join('\n')+`\nTotal: ${euros(total)}`;
+    document.querySelector('#ped-importe').value=String(total);
+    document.querySelector('#ped-asunto').value=`Pedido ${ref} · ${document.querySelector('#ped-nombre').value.trim()} · ${euros(total)}`;
+    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),25000);
     enviar.disabled=true;estado.textContent='Enviando la reserva…';
     try{
-      const r=await fetch(config.endpoint,{method:'POST',body:new FormData(pedidoForm),headers:{Accept:'application/json'},signal:ctrl.signal});
-      if(!r.ok)throw new Error('Formspree');
+      const datos=new FormData(pedidoForm);
+      if(hoja){
+        // Google Apps Script no permite leer la respuesta desde otro dominio: se envía en modo no-cors.
+        await fetch(hoja,{method:'POST',mode:'no-cors',body:new URLSearchParams(datos),signal:ctrl.signal});
+      }else{
+        const r=await fetch(formspree,{method:'POST',body:datos,headers:{Accept:'application/json'},signal:ctrl.signal});
+        if(!r.ok)throw new Error('Formspree');
+      }
       pedidoForm.reset();actualizar();
-      estado.innerHTML='';const ok=document.createElement('span');ok.className='ok';
-      ok.textContent=`Reserva enviada. Tu número es ${ref}. Te escribiremos desde asambleaceipperu@gmail.com para confirmarla y explicarte cómo pagar.`;estado.append(ok);
+      const ok=document.createElement('span');ok.className='ok';
+      ok.textContent=`Reserva enviada. Tu número es ${ref} y el importe, ${euros(total)}. Te escribiremos desde asambleaceipperu@gmail.com para confirmarla y explicarte cómo pagar.`;
+      estado.replaceChildren(ok);
     }catch{estado.textContent='No se ha podido enviar. Tu reserva sigue aquí: inténtalo de nuevo o escríbenos a asambleaceipperu@gmail.com.';}
     finally{clearTimeout(t);enviar.disabled=false;}
   });

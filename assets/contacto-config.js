@@ -6,5 +6,8 @@
    Instrucciones completas: CONTACTO-Y-PUBLICACION.md, fuera de la carpeta web. */
 window.ASAMBLEA_CONTACTO = {
   endpoint: 'https://formspree.io/f/xgaoglpe',
-  privacidadRevisada: true
+  privacidadRevisada: true,
+  // Dirección de la aplicación web de Google Apps Script que guarda los pedidos en la hoja (https://script.google.com/macros/s/…/exec).
+  // Mientras esté vacía, los pedidos se envían por Formspree al correo de la asamblea.
+  pedidos: ''
 };
