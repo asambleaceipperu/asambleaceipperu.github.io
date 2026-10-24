@@ -55,15 +55,16 @@ if(pedidoForm){
   const vista=document.querySelector('#ped-vista');const cantidades=[...pedidoForm.querySelectorAll('input[data-producto]')];
   const euros=n=>n.toLocaleString('es-ES')+' €';
   const num=i=>Math.max(0,Math.min(50,Math.floor(+i.value||0)));
+  const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Chapa','Chapas'],['Rifa','Rifa']];
   function calcular(){
     const out=[];let total=0;
-    const cam=cantidades.filter(i=>i.dataset.producto==='Camiseta'&&num(i)>0);
-    const nCam=cam.reduce((a,i)=>a+num(i),0);
-    if(nCam){out.push(`Camisetas: ${cam.map(i=>`${num(i)} × ${i.dataset.detalle}`).join(', ')} (${euros(nCam*10)})`);total+=nCam*10;}
-    const ch=num(document.querySelector('#chapas'));
-    if(ch){const m=document.querySelector('#chapas-modelos').value.trim();out.push(`Chapas: ${ch}${m?` (modelos: ${m})`:''} (${euros(ch*2)})`);total+=ch*2;}
-    const r=num(document.querySelector('#rifa-n'));
-    if(r){out.push(`Rifa: ${r} participaciones (${euros(r*5)})`);total+=r*5;}
+    for(const [prod,nombre] of GRUPOS){
+      const items=cantidades.filter(i=>i.dataset.producto===prod&&num(i)>0);
+      const n=items.reduce((a,i)=>a+num(i),0);if(!n)continue;
+      const importe=n*(+items[0].dataset.precio);total+=importe;
+      if(prod==='Rifa')out.push(`Rifa: ${n} ${n===1?'participación':'participaciones'} (${euros(importe)})`);
+      else out.push(`${nombre}: ${items.map(i=>`${num(i)} × ${i.dataset.detalle}`).join(', ')} (${euros(importe)})`);
+    }
     return {lineas:out,total};
   }
   function actualizar(){
@@ -79,7 +80,7 @@ if(pedidoForm){
   pedidoForm.addEventListener('submit',async ev=>{
     ev.preventDefault();
     const {lineas,total}=actualizar();
-    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una chapa o una participación.';return;}
+    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una chapa o una participación.';return;}
     for(const id of ['#ped-nombre','#ped-email','#ped-privacidad']){const el=document.querySelector(id);if(!el.checkValidity()){el.reportValidity();return;}}
     const ref='P-'+new Date().toISOString().slice(5,10).replace('-','')+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
     document.querySelector('#ped-ref').value=ref;
