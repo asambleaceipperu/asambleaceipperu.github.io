@@ -55,7 +55,7 @@ if(pedidoForm){
   const vista=document.querySelector('#ped-vista');const cantidades=[...pedidoForm.querySelectorAll('input[data-producto]')];
   const euros=n=>n.toLocaleString('es-ES')+' €';
   const num=i=>Math.max(0,Math.min(50,Math.floor(+i.value||0)));
-  const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Chapa','Chapas'],['Rifa','Rifa']];
+  const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Tote','Tote bags'],['Chapa','Chapas'],['Rifa','Rifa']];
   function calcular(){
     const out=[];let total=0;
     for(const [prod,nombre] of GRUPOS){
@@ -63,6 +63,7 @@ if(pedidoForm){
       const n=items.reduce((a,i)=>a+num(i),0);if(!n)continue;
       const importe=n*(+items[0].dataset.precio);total+=importe;
       if(prod==='Rifa')out.push(`Rifa: ${n} ${n===1?'participación':'participaciones'} (${euros(importe)})`);
+      else if(!items[0].dataset.detalle)out.push(`${nombre}: ${n} (${euros(importe)})`);
       else out.push(`${nombre}: ${items.map(i=>`${num(i)} × ${i.dataset.detalle}`).join(', ')} (${euros(importe)})`);
     }
     return {lineas:out,total};
@@ -80,7 +81,7 @@ if(pedidoForm){
   pedidoForm.addEventListener('submit',async ev=>{
     ev.preventDefault();
     const {lineas,total}=actualizar();
-    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una chapa o una participación.';return;}
+    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una tote bag, una chapa o una participación.';return;}
     for(const id of ['#ped-nombre','#ped-email','#ped-privacidad']){const el=document.querySelector(id);if(!el.checkValidity()){el.reportValidity();return;}}
     const ref='P-'+new Date().toISOString().slice(5,10).replace('-','')+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
     document.querySelector('#ped-ref').value=ref;
