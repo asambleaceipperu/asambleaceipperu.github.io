@@ -1,41 +1,79 @@
-// Emojis: adivinar una película, canción o huelga. Cada fallo destapa una pista más (cuatro como mucho).
+// Cartelera: cuatro películas (o canciones) contadas con emojis y seis títulos, dos de ellos de sobra.
+// Hay que emparejarlas. Tres intentos: lo acertado se queda fijo y lo demás vuelve a la mesa.
 import { h, barajar } from '../dom.js';
 
+const MAX = 3;
+
 export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar }) {
-  const pistas = datos.pistas; // [{ emojis } | { texto }] (la primera, emojis)
-  const opciones = barajar(datos.opciones, semilla); // incluye la respuesta
-  const falladas = progreso?.falladas ? [...progreso.falladas] : [];
+  const items = datos.items; // [{ emojis, alt, titulo, detalle?, explica }]
+  const titulos = barajar([...items.map(it => it.titulo), ...(datos.distractores || [])], semilla);
+  const historial = progreso?.historial ? [...progreso.historial] : []; // [{ puestas, marcas: [bool] }]
+  const fijas = items.map((it, i) => (historial.some(r => r.marcas[i]) ? it.titulo : null));
+  let puestas = [...fijas];
+  let activa = puestas.findIndex(v => v === null);
   let fin = false;
 
-  const cajaPistas = h('div.pistas');
-  const cajaOpciones = h('div.opciones');
-  const puntos = h('span.puntos');
-  raiz.append(h('p.enunciado', {}, datos.enunciado || '¿Qué es? Cada fallo destapa una pista nueva.'), cajaPistas, cajaOpciones, h('p.intentos', {}, 'Pistas', puntos));
+  const tablero = h('div.cartelera');
+  const caja = h('div.fichas-palabra');
+  const puntos = h('span.puntos', { 'aria-label': 'intentos' });
+  const intentosEl = h('p.intentos', {}, 'Intentos', puntos);
+  const boton = h('button.boton', { type: 'button', onclick: comprobar, disabled: true }, 'Comprobar');
+  const borrar = h('button.boton.claro', { type: 'button', onclick: () => { puestas = [...fijas]; activa = puestas.findIndex(v => v === null); pinta(); } }, 'Borrar');
+  raiz.append(h('p.enunciado', {}, datos.enunciado || 'Cuatro películas contadas con emojis. Toca un cartel y luego su título. Sobran dos títulos.'), tablero, caja, intentosEl, h('div.botones', {}, borrar, boton));
 
   function pinta() {
-    const visibles = Math.min(pistas.length, falladas.length + 1);
-    cajaPistas.replaceChildren(...pistas.slice(0, fin ? pistas.length : visibles).map(p => p.emojis ? h('div.pista.emojis', { role: 'img', 'aria-label': p.alt || 'pista con emojis' }, p.emojis) : h('div.pista.texto', {}, p.texto)));
-    cajaOpciones.replaceChildren(...opciones.map(o => {
-      const mal = falladas.includes(o), bien = fin && o === datos.respuesta;
-      return h(`button.opcion${mal ? '.mal' : ''}${bien ? '.bien' : ''}`, { type: 'button', disabled: mal || fin, onclick: () => elegir(o) }, o);
+    const ultima = historial[historial.length - 1];
+    tablero.classList.toggle('terminada', fin);
+    tablero.replaceChildren(...items.map((it, i) => {
+      const estado = fin ? (puestas[i] === it.titulo || fijas[i] ? '.bien' : '.mal') : fijas[i] ? '.bien' : i === activa ? '.activa' : '';
+      return h(`button.cartel${estado}`, {
+        type: 'button', disabled: fin || !!fijas[i], 'aria-label': `Película ${i + 1}: ${it.alt || it.emojis}`,
+        onclick: () => { if (puestas[i] && !fijas[i]) puestas[i] = null; activa = i; pinta(); },
+      },
+      h('span.cartel-emojis', { 'aria-hidden': 'true' }, it.emojis),
+      h('span.cartel-titulo', {}, fin ? it.titulo : puestas[i] || (ultima && !ultima.marcas[i] ? 'Prueba otro' : '¿Cuál es?')),
+      fin && it.detalle ? h('span.cartel-detalle', {}, it.detalle) : null,
+      fin && it.explica ? h('span.explica', {}, it.explica) : null);
     }));
-    puntos.replaceChildren(...pistas.map((_, i) => h(`i${i < visibles ? '' : '.gastado'}`)));
+    const usadas = new Set(puestas);
+    const descartadas = new Set(historial.flatMap(r => r.puestas.filter((t, i) => !r.marcas[i])));
+    caja.hidden = fin;
+    caja.replaceChildren(...titulos.map(t => h(`button${descartadas.has(t) && !usadas.has(t) ? '.fallo' : ''}`, {
+      type: 'button', disabled: fin || usadas.has(t),
+      onclick: () => {
+        const destino = activa >= 0 && !puestas[activa] ? activa : puestas.findIndex(v => v === null);
+        if (destino < 0) return;
+        puestas[destino] = t;
+        activa = puestas.findIndex(v => v === null);
+        pinta();
+      },
+    }, t)));
+    puntos.replaceChildren(...Array.from({ length: MAX }, (_, i) => h(`i${i < historial.length ? '.gastado' : ''}`)));
+    boton.disabled = fin || puestas.some(v => v === null);
   }
-  function elegir(o) {
-    if (fin) return;
-    if (o === datos.respuesta) return terminar(true);
-    falladas.push(o);
-    alProgreso({ falladas });
-    if (falladas.length >= pistas.length) return terminar(false);
-    pinta();
+  function comprobar() {
+    const marcas = items.map((it, i) => puestas[i] === it.titulo);
+    historial.push({ puestas: [...puestas], marcas });
+    alProgreso({ historial });
+    marcas.forEach((m, i) => { if (m) fijas[i] = items[i].titulo; });
+    const gana = marcas.every(Boolean);
+    if (gana || historial.length >= MAX) return terminar(gana);
+    // Un momento en rojo lo que no era, y vuelve a la mesa.
+    tablero.querySelectorAll('.cartel').forEach((c, i) => c.classList.add(marcas[i] ? 'bien' : 'mal'));
+    puntos.replaceChildren(...Array.from({ length: MAX }, (_, i) => h(`i${i < historial.length ? '.gastado' : ''}`)));
+    boton.disabled = true;
+    setTimeout(() => { puestas = [...fijas]; activa = puestas.findIndex(v => v === null); pinta(); }, 1100);
   }
   function terminar(gana) {
-    fin = true; pinta();
-    alProgreso({ falladas, fin: true, gana });
-    const usadas = falladas.length + (gana ? 1 : 0);
-    const emoji = (pistas[0].emojis || '') + '\n' + pistas.map((_, i) => (i < falladas.length ? '🟥' : i === falladas.length && gana ? '🟩' : '⬜')).join('');
-    alTerminar({ resuelto: gana, emoji, marcador: gana ? `a la ${usadas}.ª pista` : 'sin acertar', solucion: datos.respuesta });
+    fin = true; boton.hidden = true; borrar.hidden = true; intentosEl.hidden = true; pinta();
+    alTerminar({
+      resuelto: gana,
+      emoji: historial.map(r => r.marcas.map(b => (b ? '🟩' : '🟥')).join('')).join('\n'),
+      marcador: `${gana ? historial.length : 'X'}/${MAX}`,
+      solucion: items.map(it => it.titulo).join(' · '),
+    });
   }
   pinta();
-  if (progreso?.fin) terminar(progreso.gana);
+  const ult = historial[historial.length - 1];
+  if (ult && (ult.marcas.every(Boolean) || historial.length >= MAX)) terminar(ult.marcas.every(Boolean));
 }

@@ -33,9 +33,8 @@
       case 'palabra': return x.palabra;
       case 'conexiones': return x.grupos.map(g => `${g.nombre}: ${g.fichas.join(', ')}`).join(' / ');
       case 'cronologia': return x.momentos.map(m => `${m.anio} ${m.texto}`).join(' → ');
-      case 'emojis': return `${x.pistas.map(p => p.emojis || p.texto).join(' · ')} → ${x.respuesta} (opciones: ${x.opciones.join(', ')})`;
+      case 'emojis': return `${x.items.map(i => `${i.emojis} → ${i.titulo}`).join(' / ')} (sobran: ${(x.distractores || []).join(', ')})`;
       case 'cuantos': return `${x.pregunta} → ${x.cifra} ${x.unidad || ''}`;
-      case 'bulo': return x.afirmaciones.map(a => `${a.cierto ? 'DATO' : 'BULO'}: ${a.texto} (${a.explica})`).join(' / ');
       case 'frase': return `${x.texto} — ${x.autor} (distractores: ${x.distractores.join(', ')})`;
     }
   };

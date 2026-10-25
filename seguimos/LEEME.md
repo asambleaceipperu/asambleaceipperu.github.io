@@ -11,23 +11,24 @@ No hay servidor ni cuentas. Lo jugado, la racha y el progreso se guardan en el n
 | `js/contenido.js` | **Los retos**, uno por día, en orden. Es lo que la asamblea toca. |
 | `js/avisos.js` | La línea «Hoy, en la huelga» que sale al terminar: avisos por fecha y cinco fijos que rotan. |
 | `revision.html` | Página sin enlazar para revisar todos los retos con sus soluciones y fuentes. |
-| `js/retos/*.js` | Los siete tipos de reto. |
+| `js/retos/*.js` | Los seis tipos de reto. |
+| `js/tarjeta.js` | La imagen que se comparte al terminar. |
 | `js/ilustraciones.js` | Los dibujos de «Lo que hay detrás». |
 | `compartir-seguimos.png` | La imagen que sale al pegar el enlace en WhatsApp. |
 
 ## Añadir días
 
-`DIAS[0]` es el Día 1, `DIAS[1]` el Día 2 y así sucesivamente. Para el Día 31, se añade un elemento más al final de la lista. Si un día no tiene reto, la página dice «La asamblea está preparando el reto de hoy» y deja jugar los anteriores, así que conviene ir **al menos una semana por delante**.
+`DIAS[0]` es el Día 1, `DIAS[1]` el Día 2 y así sucesivamente. Para el Día 61, se añade un elemento más al final de la lista. Si un día no tiene reto, la página dice «La asamblea está preparando el reto de hoy» y deja jugar los anteriores, así que conviene ir **al menos una semana por delante**.
 
 Cada día lleva:
 
 ```js
 {
-  tipo: 'palabra',                    // uno de los siete tipos (abajo)
+  tipo: 'palabra',                    // uno de los seis tipos (abajo)
   titulo: 'Opcional, encima del reto',
   datos: { palabra: 'ASAMBLEA' },     // depende del tipo
   detras: {
-    tema: 'multitud', ilus: { texto: 'DÍA 31' },
+    tema: 'multitud', ilus: { texto: 'DÍA 61' },
     titulo: 'Título de «Lo que hay detrás»',
     texto: ['Primer párrafo.', 'Segundo párrafo.'],
     fuente: { nombre: 'Por qué hacemos huelga', url: '../huelga.html' },
@@ -35,15 +36,14 @@ Cada día lleva:
 },
 ```
 
-### Los siete tipos
+### Los seis tipos
 
-- **palabra** (Wordle, 6 intentos): `{ palabra: 'TIZA', pista: 'opcional' }`. Entre 4 y 8 letras; la Ñ vale y las tildes se ignoran.
-- **conexiones** (16 fichas, 4 grupos, 4 fallos): `{ grupos: [{ nombre, fichas: [4 textos] }, ×4] }`, del grupo más fácil al más difícil. Las fichas, cortas (hasta unas 14 letras) y sin repetir.
-- **cronologia** (ordenar 5 momentos, 3 intentos): `{ enunciado?, momentos: [{ texto, anio }] }`, ya en el orden correcto (la página los desordena).
-- **emojis** (adivinar una película o una canción por pistas): `{ pistas: [{ emojis: '🏫🦋', alt: 'descripción' } o { texto: 'Pista escrita' }], opciones: [6 títulos], respuesta: 'uno de ellos' }`. Cada fallo destapa otra pista.
-- **cuantos** (adivinar una cifra; dice «más» o «menos», 6 intentos): `{ pregunta, cifra, unidad?, maximo? }`.
-- **bulo** (¿bulo o dato?, 5 frases): `{ afirmaciones: [{ texto, cierto: true/false, explica }] }`.
-- **frase** (completar una cita): `{ texto: 'La educación es [arma] más [poderosa]…', distractores: ['palabras', 'que', 'no'], autor }`. Lo que va entre corchetes son los huecos.
+- **palabra** (tipo Wordle, 6 intentos): `{ palabra: 'TIZA', pista: 'opcional' }`. Entre 4 y 8 letras. La Ñ vale y las tildes se ignoran.
+- **conexiones** (16 fichas, 4 grupos, 4 fallos): `{ grupos: [{ nombre, fichas: [4 textos], explica }, ×4] }`, ordenados del más fácil al más difícil. La `explica` de cada grupo sale al acertarlo. Funciona mejor con trampas: fichas que parezcan de un grupo y sean de otro, pero con una sola solución posible. Evita los grupos que se ven a la legua, como cuatro números. Las fichas tienen que ser cortas (hasta 14 letras) y no pueden repetirse.
+- **cronologia** (ordenar 5 momentos, 3 intentos): `{ enunciado?, momentos: [{ texto, anio, explica }] }`, ya en el orden correcto (la página los desordena). Al terminar se ve el año y la explicación de cada momento.
+- **emojis**, la «Cartelera» (emparejar 4 películas o canciones con su título, 3 intentos): `{ enunciado?, items: [{ emojis, alt, titulo, detalle, explica }, ×4], distractores: [2 títulos] }`. Los títulos tienen que ser los del estreno en España (compruébalo en FilmAffinity España).
+- **cuantos** (adivinar una cifra; se dice «es más» o «es menos» y entre qué cifras está, 6 intentos): `{ pregunta, cifra, unidad?, maximo? }`. La cifra tiene que ser exacta y tener una fuente clara.
+- **frase** (completar una cita, 4 intentos con pistas de colores): `{ texto: 'La educación es el [arma] más [poderosa]…', distractores: ['palabras', 'que', 'sobran'], autor }`. Lo que va entre corchetes son los huecos. Usa solo citas comprobadas; si la autoría está en duda, pon «atribuida a».
 
 ### Las ilustraciones
 
@@ -67,7 +67,7 @@ Desde la carpeta raíz del repositorio:
 python3 -m http.server 8000
 ```
 
-- <http://localhost:8000/seguimos/?hoy=31> simula que hoy es el Día 31.
+- <http://localhost:8000/seguimos/?hoy=40> simula que hoy es el Día 40.
 - <http://localhost:8000/seguimos/revision.html> muestra todos los retos con sus soluciones.
 - Para empezar de cero en el navegador, borra los datos del sitio, o ejecuta en la consola `localStorage.removeItem('seguimos-v1')`.
 

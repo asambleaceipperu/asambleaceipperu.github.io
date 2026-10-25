@@ -3,7 +3,7 @@
 import { h, barajar } from '../dom.js';
 
 export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar }) {
-  const momentos = datos.momentos; // [{ texto, anio }] en orden correcto
+  const momentos = datos.momentos; // [{ texto, anio, explica }] en orden correcto; la explicación sale al terminar.
   let orden = progreso?.orden || barajar(momentos.map((_, i) => i), semilla);
   if (orden.every((v, i) => v === i)) orden = [...orden.slice(1), orden[0]];
   const historial = progreso?.historial ? [...progreso.historial] : [];
@@ -21,8 +21,8 @@ export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar 
     lista.replaceChildren(...orden.map((mi, pos) => {
       const m = momentos[mi];
       const li = h(`li.momento${marcas ? (marcas[pos] ? '.bien' : '.mal') : ''}`, { 'data-pos': pos },
-        h('span.asa', { 'aria-hidden': 'true' }, '⋮⋮'),
-        h('span', {}, m.texto, fin ? h('span.anio', {}, ` · ${m.anio}`) : null),
+        fin ? h('span.anio', {}, m.anio) : h('span.asa', { 'aria-hidden': 'true' }, '⋮⋮'),
+        h('span', {}, m.texto, fin && m.explica ? h('span.explica', {}, m.explica) : null),
         fin ? null : h('span.flechas', {},
           h('button', { type: 'button', 'aria-label': 'Subir', disabled: pos === 0, onclick: () => mover(pos, pos - 1) }, '↑'),
           h('button', { type: 'button', 'aria-label': 'Bajar', disabled: pos === orden.length - 1, onclick: () => mover(pos, pos + 1) }, '↓')));
@@ -55,7 +55,7 @@ export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar 
   function terminar(gana) {
     fin = true;
     if (!gana) { orden = momentos.map((_, i) => i); marcas = orden.map(() => true); }
-    pinta(); boton.hidden = true;
+    lista.classList.add('terminada'); pinta(); boton.hidden = true; intentosEl.hidden = true;
     const emoji = historial.map(m => m.map(b => (b ? '🟩' : '🟥')).join('')).join('\n');
     alTerminar({ resuelto: gana, emoji, marcador: gana ? `${historial.length}/${MAX}` : 'X/3', solucion: momentos.map(m => m.anio).join(' → ') });
   }

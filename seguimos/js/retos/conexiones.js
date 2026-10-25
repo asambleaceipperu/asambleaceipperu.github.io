@@ -2,7 +2,7 @@
 import { h, barajar } from '../dom.js';
 
 export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar }) {
-  const grupos = datos.grupos; // [{ nombre, fichas: [4], explica? }]
+  const grupos = datos.grupos; // [{ nombre, fichas: [4], explica }]: la explicación sale al acertar el grupo.
   const todas = grupos.flatMap((g, gi) => g.fichas.map(f => ({ f, gi })));
   let orden = barajar(todas, semilla);
   const resueltos = progreso?.resueltos ? [...progreso.resueltos] : [];
@@ -21,7 +21,7 @@ export function montar(raiz, datos, { semilla, progreso, alProgreso, alTerminar 
 
   function pinta() {
     tablero.replaceChildren();
-    resueltos.forEach(gi => tablero.append(h(`div.grupo.g${gi + 1}`, {}, h('b', {}, grupos[gi].nombre), h('span', {}, grupos[gi].fichas.join(' · ')))));
+    resueltos.forEach(gi => tablero.append(h(`div.grupo.g${gi + 1}`, {}, h('b', {}, grupos[gi].nombre), h('span', {}, grupos[gi].fichas.join(' · ')), grupos[gi].explica ? h('p.explica', {}, grupos[gi].explica) : null)));
     for (const o of orden) {
       if (resueltos.includes(o.gi)) continue;
       const tam = o.f.length > 12 ? '10.5px' : o.f.length > 9 ? '12px' : o.f.length > 6 ? '13.5px' : null;

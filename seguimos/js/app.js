@@ -7,8 +7,10 @@ import { TIPOS } from './retos/index.js';
 import { DIAS } from './contenido.js';
 import { avisoDelDia } from './avisos.js';
 import { ilustracion } from './ilustraciones.js';
+import { dibujarTarjeta, compartirTarjeta, fraseReto } from './tarjeta.js';
 
 const URL_JUEGO = 'https://asambleaceipperu.github.io/seguimos/';
+const CAMISETA = '<svg viewBox="0 0 48 48" width="44" height="44"><path d="M17 6 6 12l4 10 5-2v22h18V20l5 2 4-10-11-6c-1 4-4 6-7 6s-6-2-7-6Z" fill="#86cd55" stroke="#0f3522" stroke-width="2.5" stroke-linejoin="round"/></svg>';
 const params = new URLSearchParams(location.search);
 // Para probar: ?hoy=20 simula que hoy es el día 20 de huelga.
 const HOY = params.has('hoy') ? +params.get('hoy') : diaDeHuelga();
@@ -81,7 +83,10 @@ function terminar(n, dia, tipo, res, nuevo) {
   const zona = document.getElementById('detras');
   zona.replaceChildren();
   const d = dia.detras;
-  const textoCompartir = `Seguimos · Día ${n} de huelga\n${tipo.emoji} ${tipo.nombre}: ${res.marcador}\n${res.emoji}\n${URL_JUEGO}`;
+  const textoCompartir = `Seguimos · Día ${n} de huelga\n${tipo.emoji} ${tipo.nombre}: ${res.marcador}\n${res.emoji}\n${fraseReto(res)} 👉 ${URL_JUEGO}`;
+  const miniatura = h('img.tarjeta', { alt: `Tarjeta del día ${n}: ${tipo.nombre}, ${res.marcador}`, width: 1080, height: 1080 });
+  let lienzo = null;
+  dibujarTarjeta({ dia: n, tipo, res }).then(cv => { lienzo = cv; miniatura.src = cv.toDataURL('image/png'); }).catch(() => miniatura.remove());
   const aviso = avisoDelDia(claveFecha(fechaDelDia(n)), n);
   const racha = estado.racha(HOY);
 
@@ -97,11 +102,16 @@ function terminar(n, dia, tipo, res, nuevo) {
         ...d.texto.map(p => h('p', {}, p)),
         d.fuente ? h('p.fuente', {}, 'Fuente: ', h('a', { href: d.fuente.url, target: '_blank', rel: 'noopener' }, d.fuente.nombre)) : null)),
     h('aside.hoy', {}, h('b', {}, n === HOY ? 'Hoy, en la huelga' : 'Y hoy, en la huelga'), h('p', {}, aviso.texto, ' ', aviso.enlace ? h('a', { href: aviso.enlace }, aviso.etiqueta || 'Más información') : null)),
+    h('a.vistete', { href: '../pedidos.html' },
+      h('span', { 'aria-hidden': 'true', html: CAMISETA }),
+      h('span', {}, h('b', {}, 'Vístete de huelga'), 'Camisetas, sudaderas y chapas. Todo va a la caja de resistencia.'),
+      h('span.flecha', { 'aria-hidden': 'true' }, '→')),
     h('div.zona.compartir', {},
       h('h2', {}, 'Compártelo sin destripar nada'),
+      miniatura,
       h('pre.vista-compartir', {}, textoCompartir),
       h('div.botones', {},
-        h('button.boton', { type: 'button', onclick: () => compartir(textoCompartir) }, 'Compartir'),
+        h('button.boton', { type: 'button', onclick: async () => { if (!(lienzo && await compartirTarjeta(lienzo, textoCompartir, `seguimos-dia-${n}.png`))) compartir(textoCompartir); } }, 'Compartir'),
         h('a.boton.amarillo', { href: `https://wa.me/?text=${encodeURIComponent(textoCompartir)}`, target: '_blank', rel: 'noopener' }, 'WhatsApp'),
         h('button.boton.claro', { type: 'button', onclick: () => copiar(textoCompartir) }, 'Copiar')),
       racha > 1 ? h('p.racha', {}, h('b', {}, racha), racha === HOY ? 'días seguidos: ¡no te has perdido ni uno!' : 'días seguidos en huelga con nosotras') : null,
