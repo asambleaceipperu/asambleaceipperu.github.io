@@ -1,0 +1,2 @@
+Aquí va la grabación del cántico (por ejemplo, cantico.mp3).
+Después, pon su nombre en `archivo`, dentro de js/cantico.js. Instrucciones en ../LEEME.md, apartado «Música».

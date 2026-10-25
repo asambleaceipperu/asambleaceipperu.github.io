@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="../juego.css"><style>body{margin:0;background:#0f3522}canvas{width:1200px;height:630px}</style>
+<canvas id="c" width="1200" height="630"></canvas>
+<script type="module">
+import { dibujaPersona, personaAzar, PROFES, conCamisetaVerde, dibujaCorroMini, azar } from '../js/personajes.js';
+import { pancarta, cartel } from '../js/ui.js';
+import { icono } from '../js/iconos.js';
+await Promise.all(['400 20px "Marker"','800 20px "Bricolage"','600 16px "Atkinson"'].map(f=>document.fonts.load(f)));
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+const g=ctx.createRadialGradient(600,250,50,600,300,800);g.addColorStop(0,'#1f5c3c');g.addColorStop(1,'#0f3522');ctx.fillStyle=g;ctx.fillRect(0,0,1200,630);
+ctx.strokeStyle='rgba(247,248,243,.05)';ctx.lineWidth=2;ctx.beginPath();for(let x=20;x<1200;x+=40){ctx.moveTo(x,0);ctx.lineTo(x,630);}for(let y=20;y<630;y+=40){ctx.moveTo(0,y);ctx.lineTo(1200,y);}ctx.stroke();
+dibujaCorroMini(ctx,92,74,30,'#f7f8f3','#86cd55');
+ctx.font='800 30px Bricolage';ctx.fillStyle='#f7f8f3';ctx.textBaseline='middle';ctx.fillText('Asamblea Docente',140,62);ctx.font='500 22px Atkinson';ctx.fillStyle='rgba(247,248,243,.7)';ctx.fillText('del CEIP Perú · Madrid',140,92);
+pancarta(ctx,['LLEGAR','A TODOS'],330,150,520,190,{t:0.5,color:'#f7f8f3',semilla:3,palos:false,tamMax:88});
+ctx.font='800 36px Bricolage';ctx.fillStyle='#ffcf33';ctx.textAlign='center';ctx.fillText('El juego de la huelga educativa',330,390);
+ctx.font='500 25px Atkinson';ctx.fillStyle='rgba(247,248,243,.85)';ctx.fillText('Da clase, sal a la calle y descubre qué pedimos.',330,432);
+ctx.fillStyle='#ffcf33';ctx.beginPath();ctx.roundRect(200,470,260,60,30);ctx.fill();ctx.font='800 28px Bricolage';ctx.fillStyle='#0f3522';ctx.fillText('5 min · un dedo',330,501);
+const r=azar(31);
+ctx.fillStyle='rgba(255,207,51,.16)';ctx.beginPath();ctx.arc(900,330,230,0,7);ctx.fill();
+const fila=[];for(let i=0;i<9;i++){fila.push(conCamisetaVerde(personaAzar(r,i%4==2?'niño':i%5==3?'mayor':'adulto')));}
+dibujaPersona(ctx,conCamisetaVerde(PROFES[0]),{x:900,y:470,esc:4.2,brazos:'arriba',expr:'feliz',t:0.4});
+fila.forEach((p,i)=>{const x=690+i*56,y=600+(i%2)*14; if(i%3==1) cartel(ctx,[['¡15 POR','AULA!'],['+600 €'],['APOYOS','YA']][i/3|0],x+12,y-112,74,40,{t:i}); dibujaPersona(ctx,p,{x,y,esc:1.55,brazos:i%3==1?'uno':'puño',expr:'gritando',t:i*0.7,paso:i*0.3});});
+for(const [x,y,s] of [[1080,120,40],[740,140,30],[1110,300,26]]) icono(ctx,'bombilla',x,y,s);
+document.title='listo';
+</script>

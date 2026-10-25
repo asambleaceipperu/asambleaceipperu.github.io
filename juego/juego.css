@@ -1,0 +1,68 @@
+/* «Llegar a todos» — capa HTML del juego (marco, botón de sonido y pantalla final). */
+@font-face{font-family:"Bricolage";src:url(../assets/fuentes/bricolage-grotesque.woff2) format("woff2-variations"),url(../assets/fuentes/bricolage-grotesque.woff2) format("woff2");font-weight:200 800;font-stretch:75% 100%;font-display:swap}
+@font-face{font-family:"Atkinson";src:url(../assets/fuentes/atkinson-hyperlegible-next.woff2) format("woff2-variations"),url(../assets/fuentes/atkinson-hyperlegible-next.woff2) format("woff2");font-weight:200 800;font-display:swap}
+@font-face{font-family:"Marker";src:url(fuentes/permanent-marker.woff2) format("woff2");font-display:block}
+
+:root{
+  --papel:#f7f8f3;--pizarra:#174d32;--honda:#0f3522;--marea:#86cd55;--suave:#e4eed8;
+  --tinta:#16221b;--margen:#e0566c;--amarillo:#ffcf33;
+  --display:"Bricolage","Arial Narrow",Arial,sans-serif;--texto:"Atkinson",Verdana,Arial,sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--honda);overscroll-behavior:none}
+body{color:var(--tinta);font:400 17px/1.5 var(--texto);-webkit-tap-highlight-color:transparent;
+  background:radial-gradient(120% 80% at 50% 0%,#1d5a3a 0%,var(--honda) 70%)}
+.marco{position:relative;margin:0 auto;height:100vh;height:100dvh;width:100%;max-width:min(100vw,calc(100dvh * .62));overflow:hidden;
+  touch-action:none;user-select:none;-webkit-user-select:none;background:var(--papel)}
+@media (min-aspect-ratio:7/10){.marco{box-shadow:0 0 0 1px #ffffff14,0 30px 80px #0008;border-radius:0}}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+
+.sonido{position:absolute;top:max(10px,env(safe-area-inset-top));right:10px;z-index:5;width:40px;height:40px;border-radius:50%;
+  border:0;background:#0f352299;color:var(--papel);display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(4px)}
+.sonido svg{width:22px;height:22px}
+.sonido .cruz{display:none}
+.sonido[aria-pressed="true"] .ondas{display:none}
+.sonido[aria-pressed="true"] .cruz{display:inline}
+.sonido:focus-visible,.capa-final a:focus-visible,.capa-final button:focus-visible{outline:3px solid var(--amarillo);outline-offset:3px}
+
+/* Pantalla final: enlaces reales y tarjeta. */
+.capa-final{position:absolute;inset:0;z-index:4;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;
+  padding:max(18px,env(safe-area-inset-top)) 16px max(22px,env(safe-area-inset-bottom));color:var(--papel);
+  display:flex;flex-direction:column;gap:12px;user-select:text;-webkit-user-select:text}
+.capa-final[hidden]{display:none}
+.capa-final .hueco{flex:0 0 auto}
+.capa-final h2{font:800 clamp(26px,8vw,34px)/1.02 var(--display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+.capa-final p{margin:0}
+.capa-final .entradilla{font-size:16px;color:#e4eed8;max-width:34ch}
+.acciones{display:grid;gap:10px;margin-top:4px}
+.accion{display:grid;grid-template-columns:48px 1fr auto;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;
+  text-decoration:none;color:var(--honda);background:var(--papel);box-shadow:0 3px 0 #0f352255;
+  opacity:0;transform:translateY(14px) scale(.98);animation:entra .5s cubic-bezier(.2,1.4,.4,1) forwards}
+.accion:nth-child(1){background:var(--amarillo)}
+.accion b{display:block;font:800 19px/1.1 var(--display)}
+.accion small{display:block;font-size:14px;line-height:1.3;color:#2c3d33}
+.accion .ico{width:48px;height:48px;border-radius:14px;background:#ffffff8c;display:grid;place-items:center}
+.accion .ico canvas{width:34px;height:34px}
+.accion .flecha{font:800 22px var(--display)}
+.accion:active{transform:translateY(2px);box-shadow:0 1px 0 #0f352255}
+.enlaces-queja{font-size:14px;color:#e4eed8;display:flex;flex-wrap:wrap;gap:4px 14px}
+.enlaces-queja a{color:var(--papel)}
+.tarjeta-zona{display:grid;gap:10px;margin-top:6px}
+.tarjeta-zona img{width:100%;max-width:340px;justify-self:center;border-radius:14px;box-shadow:0 10px 30px #0006}
+.botones{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.boton{font:800 17px/1 var(--display);border:0;border-radius:999px;padding:14px 20px;cursor:pointer;text-decoration:none;
+  background:var(--marea);color:var(--honda);box-shadow:0 3px 0 #0f352277;display:inline-flex;align-items:center;gap:8px}
+.boton.secundario{background:transparent;color:var(--papel);box-shadow:inset 0 0 0 2px #f7f8f366}
+.boton:active{transform:translateY(2px)}
+.nota-final{font-size:13px;color:#cfe0c6;text-align:center}
+.nota-final a{color:var(--papel)}
+@keyframes entra{to{opacity:1;transform:none}}
+
+.aviso-giro{display:none}
+@media (orientation:landscape) and (max-height:500px){
+  .aviso-giro{display:grid;place-items:center;position:fixed;inset:0;z-index:9;margin:0;background:var(--honda);color:var(--papel);
+    font:800 22px var(--display);text-align:center;padding:20px}
+}
+.sin-js{position:absolute;inset:0;display:grid;place-content:center;padding:24px;text-align:center;background:var(--papel)}
+
+@media (prefers-reduced-motion:reduce){.accion{animation:none;opacity:1;transform:none}}
