@@ -76,16 +76,24 @@ if(pedidoForm){
     else lineas.forEach((t,k)=>{if(k)p.append(document.createElement('br'));p.append(t);});
     return {lineas,total};
   }
+  const recogeBox=document.querySelector('#ped-recoge-box');const recoge=document.querySelector('#ped-recoge');
+  const recogida=()=>(pedidoForm.querySelector('input[name="recogida"]:checked')||{}).value||'';
+  function verRecoge(){const otro=recogida()==='Alguien del cole';if(recogeBox){recogeBox.hidden=!otro;recoge.required=otro;}}
+  pedidoForm.addEventListener('change',verRecoge);
   pedidoForm.addEventListener('input',actualizar);
   if(hoja||formspree)enviar.disabled=false;else estado.textContent='Las reservas todavía no están activas. Escríbenos a asambleaceipperu@gmail.com.';
   pedidoForm.addEventListener('submit',async ev=>{
     ev.preventDefault();
     const {lineas,total}=actualizar();
     if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una tote bag, una chapa o una participación.';return;}
+    const radio=pedidoForm.querySelector('input[name="recogida"]');
+    if(radio&&!recogida()){radio.reportValidity();estado.textContent='Elige cómo vas a recogerlo.';return;}
+    if(recoge&&recoge.required&&!recoge.value.trim()){recoge.value='';recoge.reportValidity();return;}
     for(const id of ['#ped-nombre','#ped-email','#ped-privacidad']){const el=document.querySelector(id);if(!el.checkValidity()){el.reportValidity();return;}}
     const ref='P-'+new Date().toISOString().slice(5,10).replace('-','')+'-'+Math.random().toString(36).slice(2,6).toUpperCase();
     document.querySelector('#ped-ref').value=ref;
-    document.querySelector('#ped-resumen').value=lineas.join('\n')+`\nTotal: ${euros(total)}`;
+    const rec=recogida()==='Alguien del cole'?`Lo recoge ${recoge.value.trim()}`:'Lo recoge en el cole quien reserva';
+    document.querySelector('#ped-resumen').value=lineas.join('\n')+`\nTotal: ${euros(total)}\nRecogida: ${rec}`;
     document.querySelector('#ped-importe').value=String(total);
     document.querySelector('#ped-asunto').value=`Pedido ${ref} · ${document.querySelector('#ped-nombre').value.trim()} · ${euros(total)}`;
     const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),25000);
@@ -99,7 +107,7 @@ if(pedidoForm){
         const r=await fetch(formspree,{method:'POST',body:datos,headers:{Accept:'application/json'},signal:ctrl.signal});
         if(!r.ok)throw new Error('Formspree');
       }
-      pedidoForm.reset();actualizar();
+      pedidoForm.reset();actualizar();verRecoge();
       const ok=document.createElement('span');ok.className='ok';
       ok.textContent=`Reserva enviada. Tu número es ${ref} y el importe, ${euros(total)}. Te escribiremos desde asambleaceipperu@gmail.com para confirmarla y explicarte cómo pagar.`;
       estado.replaceChildren(ok);
