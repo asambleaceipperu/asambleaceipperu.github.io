@@ -116,10 +116,18 @@ function terminar(n, dia, tipo, res, nuevo) {
         h('button.boton.claro', { type: 'button', onclick: () => copiar(textoCompartir) }, 'Copiar')),
       racha > 1 ? h('p.racha', {}, h('b', {}, racha), racha === HOY ? 'días seguidos: ¡no te has perdido ni uno!' : 'días seguidos en huelga con nosotras') : null,
       n === HOY ? cuentaAtras() : null),
+    minijuegoDiferido(),
   );
   zona.hidden = false;
   pintaArchivo(n);
   if (nuevo) setTimeout(() => zona.scrollIntoView({ behavior: 'smooth', block: 'start' }), 600);
+}
+
+// El minijuego se carga solo cuando hace falta.
+function minijuegoDiferido() {
+  const hueco = h('div.mani-hueco');
+  import('./mani.js').then(m => hueco.replaceWith(m.minijuego())).catch(() => hueco.remove());
+  return hueco;
 }
 
 function cuentaAtras() {

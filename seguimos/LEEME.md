@@ -13,6 +13,7 @@ No hay servidor ni cuentas. Lo jugado, la racha y el progreso se guardan en el n
 | `revision.html` | Página sin enlazar para revisar todos los retos con sus soluciones y fuentes. |
 | `js/retos/*.js` | Los seis tipos de reto. |
 | `js/tarjeta.js` | La imagen que se comparte al terminar. |
+| `js/mani.js` | El minijuego del final: acompañar a una profe de Atocha a la Consejería. |
 | `js/ilustraciones.js` | Los dibujos de «Lo que hay detrás». |
 | `compartir-seguimos.png` | La imagen que sale al pegar el enlace en WhatsApp. |
 
