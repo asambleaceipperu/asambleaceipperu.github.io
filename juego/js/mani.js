@@ -1,303 +1,330 @@
-// Modo Mani: arrastra la cabecera. La gente de las aceras se suma si pasas cerca, y en cada glorieta
-// eliges qué pancarta llevar (solo cabe una de cada par). La mani 2 acaba ante la Consejería con un
-// momento rítmico: «Zarzalejo, reúnete ya» y «Educación pública y de calidad».
-import { TAU, clamp, lerp, damp, ease, rr, circulo, elipse, sombra, fuentes, azar, alfa, formatoNum, mezcla } from './util.js';
-import { dibujaPersona, personaAzar, PROFES, conCamisetaVerde, spritePersona, pintaSprite, PAL } from './personajes.js';
+// Modo Mani (v2): corredor en perspectiva detrás de la multitud.
+// Arrastra a izquierda y derecha. Puertas que suman o multiplican, «día sin sueldo» que hace que la gente
+// se descuelgue (salvo que hayas pasado por la caja de resistencia), obras que estrechan la calle,
+// grupos que se suman desde las aceras y, en cada glorieta, dos pancartas: solo cabe una.
+// La mani 2 acaba al atardecer ante la Consejería con el cántico al ritmo.
+import { TAU, clamp, lerp, damp, ease, rr, circulo, elipse, fuentes, azar, alfa, formatoNum, mezcla } from './util.js';
+import { dibujaPersona, personaAzar, PROFES, conCamisetaVerde, spritePersona, pintaSprite, PAL, dibujaCorroMini } from './personajes.js';
 import { icono } from './iconos.js';
-import { C, hoja, parrafo, rotulo, crearParticulas, pancarta, cartel, aparece } from './ui.js';
+import { C, rotulo, crearParticulas, pancarta, cartel } from './ui.js';
+import { crearHumo, etalonar, crearSacudida } from './fx.js';
 import { REIVINDICACIONES, IDS, ACTUAL } from './datos.js';
 import { CANTICO, eventosFrase } from './cantico.js';
 
-const V = 92; // velocidad de la mani (px/s)
-const CALLE = { x0: 52, x1: 348 }; // zona por la que se puede andar (calzada + aceras)
-const SEP = 21; // separación entre manifestantes
+const V = 108; // avance de la mani (unidades de mundo por segundo)
+const CALZADA = 125; // media anchura transitable
+const FACHADA = 178; // donde empiezan los edificios
+const FILA = 15, SEP = 21; // separación entre filas y entre personas
+const VISIBLES_MAX = 230;
+const POR_SPRITE = 6; // cada figura representa a unas cuantas personas
+const ESC_SPRITE = 1.4; // resolución de la caché de figuras
 
 export function escenaMani(juego, { n = 1 }) {
   const { W } = juego;
   const est = juego.estado;
   const r = azar(900 + n * 31 + (est.inicio % 1000));
   const part = crearParticulas();
+  const humo = crearHumo(320);
+  const sacudida = crearSacudida(juego.reducido);
   let H = juego.H;
-  const yLider = () => H * 0.64;
 
-  // ---------- Pares de reivindicaciones de esta mani ----------
+  // ---------- Cámara en perspectiva ----------
+  const cam = { d: 0, x: 0, horizonte: 0, F: 0, h: 0, zLider: 470, lleno: 0 };
+  function disponerCamara() {
+    H = juego.H;
+    cam.horizonte = H * 0.2;
+    // Con poca gente la cabecera va más abajo y la calle no se ve vacía; al crecer, la cámara se eleva.
+    const yLider = H * lerp(0.64, 0.5, cam.lleno);
+    cam.F = (W * 0.41 * cam.zLider) / CALZADA;
+    cam.h = ((yLider - cam.horizonte) * cam.zLider) / cam.F;
+  }
+  disponerCamara();
+  // Proyecta un punto del mundo (x lateral, d hacia delante, h altura) a la pantalla: [x, y, escala, z].
+  function proy(x, d, h = 0) {
+    const z = d - cam.d;
+    if (z < 40) return null;
+    const s = cam.F / z;
+    return [W / 2 + (x - cam.x) * s, cam.horizonte + (cam.h - h) * s, s, z];
+  }
+
+  // ---------- Luz de la escena (la mani del 22-O es al atardecer) ----------
+  const tarde = n === 2;
+  const cielo = tarde ? ['#3b2a5c', '#c4517a', '#f6a35c', '#ffd79a'] : ['#7fc3e8', '#a9d8ef', '#f6e7c0', '#ffeec4'];
+  const luzBorde = tarde ? 'rgba(255,170,90,.55)' : 'rgba(255,240,200,.45)';
+
+  // ---------- Pares de reivindicaciones ----------
   if (!est.ofrecidas.length) {
-    const b = r.barajar(IDS);
-    est.ofrecidas = [[b[0], b[1]], [b[2], b[3]], [b[4], b[5]]];
+    // Si ya hay elegidas (por ejemplo, al probar una escena suelta), los pares se construyen alrededor de ellas.
+    const ya = est.elegidas.slice(0, 2);
+    const b = [...ya, ...r.barajar(IDS.filter(id => !ya.includes(id)))];
+    est.ofrecidas = ya.length === 2 ? [[b[0], b[2]], [b[1], b[3]], [b[4], b[5]]] : [[b[0], b[1]], [b[2], b[3]], [b[4], b[5]]];
   }
   let pares;
   if (n === 1) pares = [est.ofrecidas[0], est.ofrecidas[1]];
   else {
-    // En la segunda: el par que no salió y las dos que dejaste atrás en la primera.
     const dejadas = [...est.ofrecidas[0], ...est.ofrecidas[1]].filter(id => !est.elegidas.includes(id));
     pares = [est.ofrecidas[2], dejadas.length >= 2 ? dejadas.slice(0, 2) : est.ofrecidas[2]];
   }
 
-  // ---------- Ruta ----------
-  // Cada tramo: { tipo, desde, hasta, ... } en «metros» de recorrido (y crece hacia delante).
-  const tramos = [];
-  let y = 0;
-  const tramo = (tipo, largo, extra = {}) => { tramos.push({ tipo, desde: y, hasta: y + largo, ...extra }); y += largo; };
+  // ---------- Recorrido: cosas a lo largo de la calle, por distancia `d` ----------
+  const cosas = [];
+  const puerta = (d, izq, der) => cosas.push({ tipo: 'puerta', d, izq, der, hecha: false });
+  const muro = d => cosas.push({ tipo: 'sueldo', d, hecha: false });
+  const obras = (d, lado) => cosas.push({ tipo: 'obras', d, largo: 220, lado, hecha: false });
+  const glorieta = (d, par, lugar) => cosas.push({ tipo: 'glorieta', d, par, lugar, hecha: false });
+  const especial = (d, x, que) => cosas.push({ tipo: 'especial', d, x, que, hecha: false });
+  const grupo = (d, x, cuantos) => cosas.push({ tipo: 'grupo', d, x, cuantos, hecha: false, gente: Array.from({ length: 6 }, () => personaAzar(r, r() < 0.2 ? 'niño' : r() < 0.2 ? 'mayor' : 'adulto')) });
+  let dMeta;
   if (n === 1) {
-    tramo('salida', 260, { lugar: 'atocha' });
-    tramo('calle', 520);
-    tramo('glorieta', 420, { lugar: 'atocha-glorieta', par: 0, radio: 74 });
-    tramo('calle', 380, { obras: true });
-    tramo('calle', 420);
-    tramo('glorieta', 420, { lugar: 'neptuno', par: 1, radio: 70 });
-    tramo('calle', 300);
-    tramo('meta', 420, { lugar: 'neptuno-fin' });
+    puerta(520, { op: '+', v: 60, txt: 'VECINAS' }, { op: '×', v: 2, txt: 'CLAUSTRO' });
+    grupo(760, -150, 40); especial(880, 150, 'batucada');
+    glorieta(1150, 0, 'Glorieta de Atocha');
+    puerta(1560, { op: 'caja' }, { op: '+', v: 120, txt: 'AMPA' });
+    grupo(1760, 150, 50);
+    muro(1980);
+    especial(2180, -150, 'perro');
+    obras(2330, 1);
+    puerta(2700, { op: '×', v: 2, txt: 'INSTITUTO' }, { op: '+', v: 220, txt: 'FAMILIAS' });
+    glorieta(3080, 1, 'Plaza de Neptuno');
+    especial(3330, -150, 'maestra');
+    dMeta = 3650;
   } else {
-    tramo('salida', 200, { lugar: 'prado' });
-    tramo('calle', 520);
-    tramo('glorieta', 420, { lugar: 'cibeles', par: 0, radio: 78 });
-    tramo('calle', 360, { lugar: 'metropolis' });
-    tramo('obrasMedio', 420, { par: 1 });
-    tramo('calle', 300);
-    tramo('meta', 520, { lugar: 'consejeria' });
+    especial(380, 150, 'coro');
+    puerta(560, { op: '+', v: 250, txt: 'BARRIO' }, { op: '×', v: 1.5, txt: 'ESTUDIANTES' });
+    glorieta(980, 0, 'Plaza de Cibeles');
+    puerta(1380, { op: '+', v: 300, txt: 'AMPAS' }, { op: 'caja' });
+    grupo(1580, -150, 60);
+    muro(1820);
+    obras(2080, -1);
+    especial(2300, 150, 'batucada');
+    puerta(2520, { op: '×', v: 2, txt: 'ASAMBLEAS' }, { op: '+', v: 500, txt: 'FAMILIAS' });
+    glorieta(2900, 1, 'Calle de Alcalá');
+    dMeta = 3300;
   }
-  const largoTotal = y;
-  const meta = tramos[tramos.length - 1];
-  const tramoEn = yy => tramos.find(t => yy >= t.desde && yy < t.hasta) || tramos[tramos.length - 1];
+  const dConsejeria = dMeta + 420;
 
-  // Límites de la zona transitable a una altura dada.
-  function limites(yy) {
-    const t = tramoEn(yy);
-    if (t.obras) {
-      const k = Math.sin(clamp((yy - t.desde) / (t.hasta - t.desde), 0, 1) * Math.PI);
-      return { x0: CALLE.x0 + 70 * clamp(k * 1.6, 0, 1), x1: CALLE.x1 - 70 * clamp(k * 1.6, 0, 1) };
-    }
-    if (t.tipo === 'meta' && t.lugar === 'consejeria') return { x0: 30, x1: W - 30 };
-    return { ...CALLE };
-  }
-  // Obstáculos centrales (fuentes de las glorietas y obras en medio).
-  function isla(yy) {
-    const t = tramoEn(yy);
-    const cy = (t.desde + t.hasta) / 2;
-    if (t.tipo === 'glorieta') return { tipo: 'circulo', x: W / 2, y: cy, r: t.radio };
-    if (t.tipo === 'obrasMedio') return { tipo: 'rect', x0: W / 2 - 62, x1: W / 2 + 62, y0: t.desde + 70, y1: t.hasta - 70 };
-    return null;
-  }
-  function restringir(o) {
-    const l = limites(o.y);
-    o.x = clamp(o.x, l.x0 + 6, l.x1 - 6);
-    const is = isla(o.y);
-    if (is?.tipo === 'circulo') {
-      const dx = o.x - is.x, dy = o.y - is.y, d = Math.hypot(dx, dy), min = is.r + 10;
-      if (d < min) { const s = dx === 0 ? (o.x < W / 2 ? -1 : 1) : 1; o.x = is.x + (dx / (d || 1)) * min * s; o.y = is.y + (dy / (d || 1)) * min; }
-    } else if (is?.tipo === 'rect' && o.y > is.y0 - 8 && o.y < is.y1 + 8 && o.x > is.x0 - 8 && o.x < is.x1 + 8) {
-      o.x = o.x < W / 2 ? is.x0 - 8 : is.x1 + 8;
+  // ---------- Fachadas madrileñas ----------
+  const COLORES_FACHADA = ['#e8c9a0', '#d9a77d', '#efdcbc', '#c98f6a', '#e6d3b3', '#d7b48f', '#cfa07c'];
+  const ROPA_VECINA = ['#e0566c', '#5b8fd6', '#ffcf33', '#86cd55', '#a77fd6'];
+  const bloques = [];
+  for (const lado of [-1, 1]) {
+    let d = -200;
+    while (d < dConsejeria + 400) {
+      const largo = 140 + r() * 150;
+      bloques.push({ lado, d0: d, d1: d + largo, alto: 170 + r() * 120, color: r.uno(COLORES_FACHADA), pancarta: r() < 0.35, bandera: r() < 0.5, vecinos: r() < 0.6, semilla: Math.floor(r() * 100), ropa: r.uno(ROPA_VECINA) });
+      d += largo + 24 + r() * 30; // calle lateral entre bloques
     }
   }
 
-  // ---------- Gente ----------
+  // ---------- La multitud ----------
   const profeP = conCamisetaVerde(PROFES[est.profe || 0]);
-  const lider = { x: W / 2, y: 40, vx: 0, paso: 0 };
-  const miembros = [];
-  // Variantes de persona para la multitud (para la caché de sprites).
+  const lider = { x: 0, d: 0, paso: 0, vx: 0 };
+  let personas = n === 1 ? 40 : Math.max(200, est.mani.ultima || 400);
+  let contador = personas;
+  let escudo = false; // caja de resistencia
   const VARIANTES = [];
   for (let i = 0; i < 40; i++) {
     const base = personaAzar(azar(500 + i), i % 7 === 0 ? 'mayor' : i % 5 === 1 ? 'niño' : 'adulto');
-    const p = i < 26 ? conCamisetaVerde(base) : base;
-    if (i < 26 && i % 5 === 3) p.ropa = PAL.amarillo; // algunas camisetas amarillas
-    if (i < 26 && i % 6 === 4) { p.ropa = '#f7f8f3'; p.marea = true; }
+    const p = i < 28 ? conCamisetaVerde(base) : base;
+    if (i < 28 && i % 5 === 3) p.ropa = PAL.amarillo;
+    if (i < 28 && i % 6 === 4) { p.ropa = '#f7f8f3'; p.marea = true; }
     VARIANTES.push(p);
   }
-  // Al darse la vuelta, cada persona pasa a dibujarse con el sprite más parecido (mucho más rápido).
-  function varianteParecida(p) {
-    let mejor = 0, mp = -1;
-    VARIANTES.forEach((v, i) => {
-      const pt = (v.peinado === p.peinado ? 2 : 0) + (v.pelo === p.pelo ? 2 : 0) + (v.edad === p.edad ? 1.5 : 0) + (v.ropa === p.ropa ? 1 : 0) + r() * 0.8;
-      if (pt > mp) { mp = pt; mejor = i; }
-    });
-    return mejor;
-  }
-  function nuevoMiembro(x, yy, extra = {}) {
-    const m = { x, y: yy, var: r.entero(0, VARIANTES.length - 1), fase: r(), puño: r() < 0.35, slot: miembros.length, salto: 0, vj: 0, ...extra };
+  const BENGALAS = ['rgba(134,205,85,.38)', 'rgba(255,207,51,.34)'];
+  const miembros = [];
+  function nuevoMiembro(desde) {
+    const m = { var: r.entero(0, VARIANTES.length - 1), fase: r(), puño: r() < 0.4, x: desde ? desde.x : lider.x + (r() - 0.5) * 60, d: desde ? desde.d : lider.d - 40 - r() * 80, salto: 0, vj: 0, sale: 0, bengala: r() < 0.06 ? r.uno(BENGALAS) : null };
     miembros.push(m);
     return m;
   }
-  const inicial = n === 1 ? 6 : Math.max(10, Math.min(150, est.mani.miembros || 40));
-  for (let i = 0; i < inicial; i++) nuevoMiembro(W / 2 + (r() - 0.5) * 60, 40 - 30 - i * 3);
+  function sincronizarVisibles(desde) {
+    const objetivo = Math.min(juego.calidad ? VISIBLES_MAX : 130, Math.max(4, Math.round(personas / POR_SPRITE)));
+    let vivos = miembros.filter(m => !m.sale).length;
+    while (vivos < objetivo) { nuevoMiembro(desde && { x: desde.x + (r() - 0.5) * 50, d: desde.d + (r() - 0.5) * 30 }); vivos++; }
+    let sobran = vivos - objetivo;
+    for (let i = miembros.length - 1; i >= 0 && sobran > 0; i--) if (!miembros[i].sale) { miembros[i].sale = 0.001; sobran--; }
+  }
+  sincronizarVisibles();
+  for (const m of miembros) { m.d = lider.d - 30 - r() * 120; m.x = (r() - 0.5) * 160; }
   const especiales = new Set(est.especiales);
-  const perro = { activo: especiales.has('perro'), x: W / 2 + 30, y: 30, paso: 0 };
-
-  // Grupos que esperan en las aceras.
-  const grupos = [];
-  function grupo(yy, lado, tipo = 'gente', tam = null) {
-    const x = lado < 0 ? CALLE.x0 + 26 : CALLE.x1 - 26;
-    const g = { x, y: yy, lado, tipo, gente: [], unido: false, t: r() * 3 };
-    const cuantos = tam || (tipo === 'gente' ? r.entero(4, 8) : 6);
-    for (let i = 0; i < cuantos; i++) {
-      let p;
-      if (tipo === 'familias') p = personaAzar(r, i % 2 ? 'niño' : 'adulto');
-      else if (tipo === 'coro') p = { ...personaAzar(r, 'adulto'), peineta: true, ropa: i % 2 ? '#e0566c' : '#0f3522', pantalon: '#16221b' };
-      else if (tipo === 'batucada') p = { ...conCamisetaVerde(personaAzar(r, 'adulto')), tambor: true };
-      else if (tipo === 'abuela') p = personaAzar(r, 'mayor');
-      else p = r() < 0.25 ? personaAzar(r, 'niño') : r() < 0.2 ? personaAzar(r, 'mayor') : personaAzar(r, 'adulto');
-      if (tipo === 'gente' && r() < 0.6) p = conCamisetaVerde(p);
-      p.semilla = r() * 3;
-      g.gente.push({ p, dx: (i % 3) * 15 * -lado + r() * 6, dy: Math.floor(i / 3) * 16 - 16 + r() * 6, brazos: r.uno(['saluda', 'puño', 'arriba', 'saluda']) });
-    }
-    grupos.push(g);
-    return g;
-  }
-  // Grupos de pancarta en cada carril de las bifurcaciones.
-  const opciones = []; // { id, par, lado, g, x, y }
-  function prepararRuta() {
-    for (const t of tramos) {
-      if (t.tipo === 'calle' || t.tipo === 'salida') {
-        for (let yy = t.desde + 120; yy < t.hasta - 60; yy += 150 + r() * 60) grupo(yy, r() < 0.5 ? -1 : 1);
-      }
-      if ((t.tipo === 'glorieta' || t.tipo === 'obrasMedio') && t.par != null) {
-        const ids = pares[t.par];
-        const cy = t.tipo === 'glorieta' ? (t.desde + t.hasta) / 2 - t.radio - 34 : t.desde + 40;
-        ids.forEach((id, i) => {
-          const lado = i === 0 ? -1 : 1;
-          const x = lado < 0 ? (t.tipo === 'glorieta' ? (CALLE.x0 + W / 2 - t.radio) / 2 : (CALLE.x0 + W / 2 - 62) / 2) : (t.tipo === 'glorieta' ? (CALLE.x1 + W / 2 + t.radio) / 2 : (CALLE.x1 + W / 2 + 62) / 2);
-          const g = { x, y: cy, lado, tipo: 'pancarta', id, gente: [], unido: false, t: 0 };
-          for (let k = 0; k < 8; k++) {
-            const p = REIVINDICACIONES[id].grupo === 'familias' && k % 2 ? personaAzar(r, 'niño') : personaAzar(r, k === 3 ? 'mayor' : 'adulto');
-            p.semilla = r() * 3;
-            if (k % 3 !== 1) Object.assign(p, conCamisetaVerde(p));
-            g.gente.push({ p, dx: ((k % 4) - 1.5) * 15, dy: Math.floor(k / 4) * 15 + 8, brazos: k % 2 ? 'puño' : 'cartel' });
-          }
-          grupos.push(g);
-          opciones.push({ id, par: t.par, lado, g, yDecision: t.tipo === 'glorieta' ? (t.desde + t.hasta) / 2 : (t.desde + t.hasta) / 2 });
-        });
-      }
-    }
-    // Grupos especiales repartidos por la ruta.
-    const calles = tramos.filter(t => t.tipo === 'calle');
-    const especialesRuta = n === 1 ? ['batucada', 'abuela', 'perro', 'familias'] : ['coro', 'familias', 'abuela', 'batucada'];
-    especialesRuta.forEach((tipo, i) => {
-      const t = calles[i % calles.length];
-      const yy = t.desde + 60 + ((i * 97) % Math.max(60, t.hasta - t.desde - 120));
-      if (tipo === 'perro') grupos.push({ x: CALLE.x1 - 24, y: yy, lado: 1, tipo: 'perro', gente: [], unido: false, t: 0 });
-      else grupo(yy, i % 2 ? 1 : -1, tipo);
-    });
-  }
-  prepararRuta();
+  const perro = { activo: especiales.has('perro'), x: 30, d: -10, paso: 0 };
+  const pancartas = [...est.elegidas]; // las que ya lleva la cabecera
+  const elegidasAqui = [];
 
   // ---------- Estado ----------
-  let fase = 'intro'; // intro → marcha → llegada → (ritmo → cierre) → fin
+  let fase = 'intro'; // intro → marcha → llegada → (ritmo → cierre)
   let tf = 0;
-  const elegidasAqui = [];
-  let pancartasFrente = est.elegidas.slice(); // las que ya lleva la mani
-  let contador = 0; // «según la organización»
+  let rotuloActual = null;
   let ritmo = null;
   let ventanas = 0;
+  let ola = []; // ondas de brazos en alto
+  const total = () => Math.round(personas);
+  const decir = (txt, sub = '', color = C.amarillo) => { rotuloActual = { t: 0, txt, sub, color }; };
 
-  const personasReales = () => Math.round(miembros.length * 14.3 + elegidasAqui.length * 40);
-
-  function unirGrupo(g) {
-    g.unido = true;
-    if (g.tipo === 'perro') { perro.activo = true; perro.x = g.x; perro.y = g.y; especiales.add('perro'); juego.audio.sfx('huevo'); part.texto(g.x, pantallaY(g.y) - 40, '¡guau!', { tam: 16 }); return; }
-    g.gente.forEach((q, i) => {
-      const m = nuevoMiembro(g.x + q.dx, g.y + q.dy, { p: q.p, entrando: 1 });
-      m.unido = juego.t + i * 0.05;
-    });
-    juego.audio.sfx('suma', { n: miembros.length });
-    part.texto(g.x, pantallaY(g.y) - 50, `+${Math.round(g.gente.length * 14.3)}`, { color: C.pizarra, tam: 18 });
-    if (g.tipo === 'batucada' || g.tipo === 'coro') { especiales.add(g.tipo); juego.audio.capa(g.tipo, true); part.texto(W / 2, yLider() - 140, g.tipo === 'batucada' ? '¡Se suma la batucada!' : '¡Se suma el coro rociero!', { color: C.margen, tam: 20, vida: 1.8, vy: -20 }); }
-    if (g.tipo === 'abuela') part.texto(g.x, pantallaY(g.y) - 76, '«40 años de maestra»', { color: C.honda, tam: 14, vida: 1.8 });
+  // ---------- Lógica ----------
+  function cambiarPersonas(nuevo, origen) {
+    const antes = personas;
+    personas = Math.max(20, nuevo);
+    const dif = Math.round(personas - antes);
+    sincronizarVisibles(dif > 0 ? origen : null);
+    if (dif > 0) juego.audio.sfx('suma', { n: miembros.length });
+    return dif;
   }
-  function elegir(op) {
-    if (elegidasAqui.some(e => opciones.find(o => o.id === e)?.par === op.par)) return;
-    elegidasAqui.push(op.id);
-    est.elegidas.push(op.id);
-    pancartasFrente.push(op.id);
-    unirGrupo(op.g);
+
+  function pasarPuerta(c) {
+    const izq = lider.x < 0;
+    const lado = izq ? c.izq : c.der;
+    c.hecha = true; c.elegido = izq ? 'izq' : 'der';
+    if (lado.op === 'caja') {
+      escudo = true;
+      juego.audio.sfx('pancarta');
+      decir('CAJA DE RESISTENCIA', 'Si descuentan el día, nadie se queda en casa', C.amarillo);
+      sacudida.golpe(4);
+      return;
+    }
+    const dif = cambiarPersonas(lado.op === '×' ? personas * lado.v : personas + lado.v, { x: lider.x, d: lider.d + 10 });
+    juego.audio.sfx(lado.op === '×' ? 'grande' : 'bombilla', { racha: 3 });
+    const p = proy(lider.x, lider.d + 30, 40);
+    if (p) part.texto(p[0], p[1] - 40, `+${formatoNum(dif)}`, { color: C.amarillo, tam: 30, vida: 1.2, vy: -60 });
+    sacudida.golpe(lado.op === '×' ? 7 : 4);
+    if (lado.op === '×') for (const m of miembros) if (r() < 0.25) m.bengala = m.bengala || BENGALAS[0];
+  }
+
+  function pasarMuro(c) {
+    c.hecha = true;
+    if (escudo) {
+      escudo = false;
+      decir('¡LA CAJA AGUANTA!', 'La caja reparte el día perdido. No se baja nadie.', C.marea);
+      juego.audio.sfx('pancarta');
+      for (let i = 0; i < 3; i++) part.confeti(W / 2 + (i - 1) * 90, H * 0.45, 16);
+      return;
+    }
+    const antes = personas;
+    cambiarPersonas(personas * 0.65);
+    decir('DÍA SIN SUELDO', `Cada día de huelga se descuenta: se bajan ${formatoNum(antes - personas)}`, '#ff9a9a');
+    juego.audio.sfx('apaga');
+    sacudida.golpe(10);
+  }
+
+  function pasarObras(c) {
+    c.hecha = true;
+    // Si la cabecera entra por el lado cerrado, se queda gente atrás.
+    const malLado = c.lado > 0 ? lider.x > -10 : lider.x < 10;
+    if (!malLado) { juego.audio.sfx('toque'); return; }
+    const antes = personas;
+    cambiarPersonas(personas * 0.8);
+    decir('¡OBRAS!', `Fase 3 de 12. Se quedan atrás ${formatoNum(antes - personas)}`, '#ffb36b');
+    juego.audio.sfx('montonCae'); sacudida.golpe(6);
+  }
+
+  function pasarGlorieta(c) {
+    c.hecha = true;
+    const ids = pares[c.par];
+    const id = lider.x < 0 ? ids[0] : ids[1];
+    elegidasAqui.push(id);
+    est.elegidas.push(id);
+    pancartas.push(id);
+    c.elegida = id;
+    cambiarPersonas(personas + 80, { x: lider.x, d: lider.d });
+    const R = REIVINDICACIONES[id];
+    decir(`PANCARTA: ${R.titulo.toUpperCase()}`, R.ysi, C.amarillo);
     juego.audio.sfx('pancarta');
-    part.confeti(op.g.x, pantallaY(op.g.y) - 30, 26);
-    // El otro grupo se despide (y se queda esperando su momento).
-    const otra = opciones.find(o => o.par === op.par && o !== op);
-    if (otra) otra.g.despide = true;
-    const R = REIVINDICACIONES[op.id];
-    banner = { t: 0, id: op.id, texto: R.titulo };
+    sacudida.golpe(5);
+    for (let i = 0; i < 2; i++) part.confeti(W / 2 + (i ? 70 : -70), H * 0.42, 26);
   }
-  let banner = null;
 
-  const pantallaY = yy => yLider() - (yy - lider.y);
+  function pasarEspecial(c) {
+    c.hecha = true;
+    if (Math.abs(lider.x - c.x) > 95) { c.perdido = true; return; }
+    c.unido = true;
+    if (c.que === 'perro') { perro.activo = true; especiales.add('perro'); decir('¡GUAU!', 'Se suma un perro con pañuelo verde', C.marea); juego.audio.sfx('huevo'); return; }
+    if (c.que === 'maestra') { cambiarPersonas(personas + 30); decir('«40 AÑOS DE MAESTRA»', 'Se suma una maestra jubilada', C.amarillo); juego.audio.sfx('huevo'); return; }
+    especiales.add(c.que);
+    juego.audio.capa(c.que, true);
+    cambiarPersonas(personas + 60, { x: c.x * 0.5, d: lider.d });
+    decir(c.que === 'batucada' ? '¡SE SUMA LA BATUCADA!' : '¡SE SUMA EL CORO ROCIERO!', c.que === 'batucada' ? 'Escucha cómo suena ahora' : 'Con peinetas y castañuelas', C.amarillo);
+    juego.audio.sfx('pancarta');
+  }
 
-  // ---------- Actualización ----------
+  function pasarGrupo(c) {
+    c.hecha = true;
+    if (Math.abs(lider.x - c.x) > 100) { c.perdido = true; return; }
+    c.unido = true;
+    const dif = cambiarPersonas(personas + c.cuantos, { x: c.x, d: c.d });
+    const p = proy(c.x, c.d + 40, 50);
+    if (p) part.texto(p[0], p[1], `+${dif}`, { color: C.papel, tam: 22 });
+  }
+
   function actualizarMarcha(dt) {
     const e = juego.entrada;
-    // La cabecera sigue el dedo en horizontal; avanza sola.
-    let tx = lider.x;
-    if (e.abajo) tx = e.x;
-    const l = limites(lider.y);
-    tx = clamp(tx, l.x0 + 10, l.x1 - 10);
-    lider.vx = damp(lider.vx, clamp((tx - lider.x) * 8, -380, 380), 12, dt);
-    lider.x += lider.vx * dt;
-    const avance = fase === 'marcha' ? V : 0;
-    lider.y += avance * dt;
-    restringir(lider);
-    lider.paso += (avance + Math.abs(lider.vx) * 0.5) * dt / 44;
-    if (fase === 'marcha' && lider.y >= meta.desde + (meta.lugar === 'consejeria' ? 160 : 200)) llegar();
-    // Unirse: grupos cercanos a la cabecera o a los costados de la mani.
-    for (const g of grupos) {
-      if (g.unido || g.tipo === 'pancarta') continue;
-      const dy = Math.abs(g.y - lider.y);
-      if (dy < 26 && Math.abs(g.x - lider.x) < 104) unirGrupo(g);
+    const pl = proy(lider.x, lider.d);
+    if (e.abajo && pl) {
+      const tx = cam.x + (e.x - W / 2) / pl[2];
+      lider.vx = damp(lider.vx, clamp((tx - lider.x) * 9, -420, 420), 14, dt);
+    } else lider.vx = damp(lider.vx, 0, 8, dt);
+    lider.x = clamp(lider.x + lider.vx * dt, -CALZADA + 14, CALZADA - 14);
+    lider.d += V * dt;
+    lider.paso += dt * 2.2;
+    // Las fuentes de las glorietas no se pueden atravesar.
+    for (const c of cosas) if (c.tipo === 'glorieta' && Math.abs(lider.d - c.d) < 70 && Math.abs(lider.x) < 66) lider.x = lider.x < 0 ? -66 : 66;
+    for (const c of cosas) {
+      if (c.hecha || lider.d < c.d) continue;
+      if (c.tipo === 'puerta') pasarPuerta(c);
+      else if (c.tipo === 'sueldo') pasarMuro(c);
+      else if (c.tipo === 'obras') pasarObras(c);
+      else if (c.tipo === 'glorieta') pasarGlorieta(c);
+      else if (c.tipo === 'especial') pasarEspecial(c);
+      else if (c.tipo === 'grupo') pasarGrupo(c);
     }
-    // Elegir pancarta: el carril por el que pasas.
-    for (const op of opciones) {
-      if (op.g.unido || op.g.despide) continue;
-      if (Math.abs(op.g.y - lider.y) < 28 && Math.abs(op.g.x - lider.x) < 70) elegir(op);
-      else if (lider.y > op.yDecision && !elegidasAqui.some(id => opciones.find(o => o.id === id)?.par === op.par)) {
-        // Si nadie eligió (pasó por en medio), se elige la del lado más cercano.
-        const delPar = opciones.filter(o => o.par === op.par);
-        delPar.sort((a, b) => Math.abs(a.g.x - lider.x) - Math.abs(b.g.x - lider.x));
-        elegir(delPar[0]);
-      }
+    if (lider.d >= dMeta) llegar();
+  }
+
+  function anchoEn(d) {
+    for (const c of cosas) {
+      if (c.tipo === 'obras' && d > c.d - 40 && d < c.d + c.largo) return c.lado > 0 ? [-CALZADA, -10] : [10, CALZADA];
+      if (c.tipo === 'glorieta' && Math.abs(d - c.d) < 75) return lider.x < 0 ? [-CALZADA, -64] : [64, CALZADA];
     }
+    if (fase !== 'marcha' && n === 2) return [-190, 190];
+    return [-CALZADA, CALZADA];
   }
 
   function actualizarMiembros(dt) {
-    // Colocación en filas detrás de la cabecera, apretándose en los estrechamientos.
-    const filasFrente = pancartasFrente.length; // filas reservadas a pancartas
-    let i = 0;
-    for (const m of miembros) {
-      const idx = i++;
-      let fila = 0, col = 0, nFila = 1;
-      // Filas de 9 como mucho.
-      const porFila = 9;
-      fila = Math.floor(idx / porFila) + 1 + filasFrente * 1.9;
-      col = idx % porFila;
-      nFila = Math.min(porFila, miembros.length - Math.floor(idx / porFila) * porFila);
-      const ty = lider.y - 20 - fila * 17;
-      const l = limites(ty);
-      const ancho = Math.min((l.x1 - l.x0) - 24, nFila * SEP);
-      const cx = clamp(lider.x * 0.55 + W / 2 * 0.45, l.x0 + ancho / 2 + 12, l.x1 - ancho / 2 - 12);
-      let tx = cx + (nFila > 1 ? (col / (nFila - 1) - 0.5) * ancho : 0) + Math.sin(m.fase * 9) * 4;
-      const tyy = ty + Math.cos(m.fase * 7) * 3;
-      const vel = m.entrando ? 260 : 220;
-      const dx = tx - m.x, dy = tyy - m.y, d = Math.hypot(dx, dy);
-      if (d > 0.5) { const s = Math.min(vel * dt, d * 6 * dt + 0.1); m.x += (dx / d) * s; m.y += (dy / d) * s; }
-      if (m.entrando && d < 30) { m.entrando = 0; if (m.p) { m.var = varianteParecida(m.p); m.puño = m.p.edad !== 'niño' && r() < 0.4; delete m.p; } }
-      restringir(m);
-      m.paso = (m.paso || m.fase) + (V * dt) / 40;
-      // Saltitos de alegría.
+    const vivos = miembros.filter(m => !m.sale);
+    const filasPancarta = pancartas.length * 2.2;
+    const [a0, a1] = anchoEn(lider.d - 30);
+    const porFila = clamp(Math.floor((a1 - a0 - 10) / SEP), 3, 11);
+    vivos.forEach((m, idx) => {
+      const fila = Math.floor(idx / porFila) + 1 + filasPancarta;
+      const col = idx % porFila;
+      const enFila = Math.min(porFila, vivos.length - Math.floor(idx / porFila) * porFila);
+      const td = lider.d - 18 - fila * FILA + Math.sin(m.fase * 9) * 3;
+      const [b0, b1] = anchoEn(td);
+      const ancho = Math.min(b1 - b0 - 16, enFila * SEP);
+      const centro = clamp(lider.x, b0 + ancho / 2 + 8, b1 - ancho / 2 - 8);
+      const tx = centro + (enFila > 1 ? (col / (enFila - 1) - 0.5) * ancho : 0) + Math.cos(m.fase * 7) * 3;
+      m.x = damp(m.x, tx, 5, dt);
+      m.d = damp(m.d, td, 4, dt);
+      m.paso = (m.paso || m.fase) + dt * 2.2;
       if (m.salto > 0 || m.vj) { m.vj -= 900 * dt; m.salto = Math.max(0, m.salto + m.vj * dt); if (m.salto === 0) m.vj = 0; }
-    }
-    if (perro.activo) {
-      const tx = lider.x + 26, ty = lider.y + 6;
-      perro.x = damp(perro.x, tx, 4, dt); perro.y = damp(perro.y, ty, 4, dt);
-      perro.paso += dt * 6;
-    }
+    });
+    // Quienes se descuelgan se paran y se van quedando atrás.
+    for (let k = miembros.length - 1; k >= 0; k--) { const m = miembros[k]; if (m.sale) { m.sale += dt; m.x += (m.x < 0 ? -40 : 40) * dt; if (m.sale > 2.2) miembros.splice(k, 1); } }
+    if (perro.activo) { perro.x = damp(perro.x, lider.x + 24, 4, dt); perro.d = damp(perro.d, lider.d - 4, 4, dt); perro.paso += dt * 6; }
+    // Humo de las bengalas.
+    for (const m of vivos) if (m.bengala && r() < dt * (juego.calidad ? 5 : 2)) { const p = proy(m.x + 6, m.d, 62); if (p && p[1] < H + 20 && p[1] > H * 0.25) humo.emitir(p[0], p[1], m.bengala, 1, { esc: p[2] * 0.6, vy: -55, tam: 8, vida: 1.8 }); }
+    ola = ola.filter(o => (o.t += dt) < 1.6);
   }
-  const saltar = (prob = 0.4, fuerza = 220) => { for (const m of miembros) if (r() < prob && m.salto === 0) { m.vj = fuerza * (0.7 + r() * 0.5); m.salto = 0.01; } };
+  const saltar = (prob = 0.4, fuerza = 220) => { for (const m of miembros) if (!m.sale && r() < prob && m.salto === 0) { m.vj = fuerza * (0.7 + r() * 0.5); m.salto = 0.01; } };
 
   function llegar() {
     fase = 'llegada'; tf = 0;
-    est.mani.max = Math.max(est.mani.max, personasReales());
-    est.mani.miembros = miembros.length;
+    est.mani.max = Math.max(est.mani.max, total());
+    est.mani.ultima = total();
     est.especiales = [...especiales];
-    if (n === 1) est.mani.n1 = personasReales();
+    if (n === 1) est.mani.n1 = total();
     juego.audio.sfx('silbato');
     saltar(0.8, 260);
-    part.confeti(W / 2, yLider() - 60, 40);
+    for (const m of miembros) if (r() < 0.2) m.bengala = m.bengala || r.uno(BENGALAS);
   }
 
   // ---------- Momento rítmico ----------
@@ -307,561 +334,645 @@ export function escenaMani(juego, { n = 1 }) {
     const ahora = juego.audio.tiempo();
     const corchea = 60 / (reloj.corriendo ? reloj.bpm : CANTICO.bpm) / 2;
     const frase = corchea * 16;
-    // Arranca en la próxima frase de «educación…» o de «zarzalejo…» según el orden del cántico.
     let inicio, k;
     if (reloj.corriendo) { k = Math.ceil((ahora - reloj.inicio + 0.35) / frase); inicio = reloj.inicio + k * frase; }
     else { k = 0; inicio = ahora + 1.2; }
     const notas = [];
-    const frases = 4;
-    for (let f = 0; f < frases; f++) {
+    for (let f = 0; f < 4; f++) {
       const nombre = CANTICO.orden[(k + f) % CANTICO.orden.length];
-      for (const ev of eventosFrase(nombre, 0)) notas.push({ t: inicio + f * frase + ev.corchea * corchea, texto: ev.texto, fuerte: ev.fuerte, frase: f, nombre, estado: 'espera' });
+      for (const ev of eventosFrase(nombre, 0)) notas.push({ t: inicio + f * frase + ev.corchea * corchea, texto: ev.texto, fuerte: ev.fuerte, frase: f, estado: 'espera' });
     }
-    ritmo = { inicio, frase, corchea, notas, aciertos: 0, total: notas.filter(n => n.fuerte).length, fin: inicio + frases * frase, racha: 0, ultimoGolpe: -9, propio: !reloj.corriendo };
+    ritmo = { inicio, frase, notas, aciertos: 0, total: notas.filter(x => x.fuerte).length, fin: inicio + 4 * frase, racha: 0, ultimoGolpe: -9 };
   }
   function actualizarRitmo() {
     const ahora = juego.audio.tiempo();
     const VENT = 0.17;
-    // Toques: el más cercano dentro de la ventana.
     for (const p of juego.entrada.pulsaciones) {
-      const tAudio = p.teclado ? ahora : ahora - (performance.now() - p.t) / 1000;
+      const tA = p.teclado ? ahora : ahora - (performance.now() - p.t) / 1000;
       let mejor = null, md = VENT;
-      for (const no of ritmo.notas) { if (!no.fuerte || no.estado !== 'espera') continue; const d = Math.abs(no.t - tAudio); if (d < md) { md = d; mejor = no; } }
+      for (const no of ritmo.notas) { if (!no.fuerte || no.estado !== 'espera') continue; const d = Math.abs(no.t - tA); if (d < md) { md = d; mejor = no; } }
       if (mejor) {
         mejor.estado = md < 0.085 ? 'perfecto' : 'bien';
         ritmo.aciertos++; ritmo.racha++;
         juego.audio.sfx('acierto', { f: 523 * 2 ** ((ritmo.racha % 5) * 2 / 12) });
-        saltar(0.35, 240);
-        ventanas = Math.min(12, ventanas + 1);
+        ola.push({ t: 0 });
+        ventanas = Math.min(24, ventanas + 2);
         ritmo.ultimoGolpe = juego.t;
-        // Más gente que llega por las calles laterales.
-        for (let i = 0; i < 2; i++) nuevoMiembro(r() < 0.5 ? 20 : W - 20, lider.y - 120 - r() * 100, { entrando: 1 });
-        part.texto(W / 2 + (r() - 0.5) * 120, H - 170, mejor.estado === 'perfecto' ? '¡PERFECTO!' : '¡BIEN!', { color: mejor.estado === 'perfecto' ? C.margen : C.pizarra, tam: 18, vida: 0.7 });
+        cambiarPersonas(personas + 40 + ritmo.racha * 10);
+        sacudida.golpe(3 + Math.min(5, ritmo.racha));
+        if (ritmo.racha % 4 === 0) for (const m of miembros) if (r() < 0.12) m.bengala = m.bengala || BENGALAS[1];
+        part.texto(W / 2 + (r() - 0.5) * 140, H * 0.36, mejor.estado === 'perfecto' ? '¡PERFECTO!' : '¡BIEN!', { color: mejor.estado === 'perfecto' ? C.amarillo : C.papel, tam: 22, vida: 0.7 });
       } else { ritmo.racha = 0; juego.audio.sfx('fallo'); }
     }
     for (const no of ritmo.notas) if (no.fuerte && no.estado === 'espera' && ahora - no.t > VENT) { no.estado = 'fallo'; ritmo.racha = 0; }
     if (ahora > ritmo.fin + 0.6) {
       fase = 'cierre'; tf = 0;
       est.ritmo = { aciertos: ritmo.aciertos, total: ritmo.total };
-      est.mani.max = Math.max(est.mani.max, personasReales());
-      est.mani.miembros = miembros.length;
+      est.mani.max = Math.max(est.mani.max, total());
+      est.mani.ultima = total();
+      juego.audio.sfx('puerta');
     }
   }
 
   // ---------- Escena ----------
   return {
-    fondo: '#cfd6d2',
-    redimensionar() { H = juego.H; },
+    fondo: cielo[0],
+    redimensionar: disponerCamara,
     info: () => ({ fase, tf, notas: ritmo ? ritmo.notas.filter(x => x.fuerte).map(x => x.t) : null }),
     entrar() {
       juego.audio.musica('mani', { reiniciar: true, capas: { batucada: especiales.has('batucada'), coro: especiales.has('coro'), canto: true } });
+      juego.audio.multitud(0.25);
+      decir(n === 1 ? 'MIÉRCOLES 14-O' : 'JUEVES 22-O · 18:00', n === 1 ? 'Primer día de huelga indefinida' : 'De Atocha a la Consejería', C.amarillo);
     },
     actualizar(dt) {
       tf += dt;
       part.actualizar(dt);
-      if (banner) { banner.t += dt; if (banner.t > 2.6) banner = null; }
+      sacudida.actualizar(dt);
+      if (rotuloActual) { rotuloActual.t += dt; if (rotuloActual.t > 2.6) rotuloActual = null; }
       if (juego.debug) window.__bot = () => {
-        // Bot: va hacia el grupo pendiente más cercano por delante.
-        const delante = grupos.filter(g => !g.unido && !g.despide && g.y > lider.y && g.y - lider.y < 260).sort((a, b) => a.y - b.y);
-        const g = delante.find(g => g.tipo === 'pancarta') || delante[0];
-        window.__stats = { miembros: miembros.length, personas: personasReales(), elegidas: est.elegidas, fase };
-        if (fase === 'ritmo') return null;
-        return g ? juego.aCss(g.x, yLider() + 30) : null;
+        // Bot de pruebas: coge la caja si no la tiene, la mejor puerta, evita las obras.
+        const sig = cosas.filter(c => !c.hecha && c.d > lider.d).sort((a, b) => a.d - b.d)[0];
+        window.__stats = { personas: total(), elegidas: est.elegidas, fase, escudo };
+        if (!sig || fase !== 'marcha') return null;
+        let x = 0;
+        if (sig.tipo === 'puerta') { const val = l => l.op === 'caja' ? (escudo ? -1 : personas * 0.45) : l.op === '×' ? personas * (l.v - 1) : l.v; x = val(sig.izq) >= val(sig.der) ? -70 : 70; }
+        else if (sig.tipo === 'obras') x = sig.lado > 0 ? -70 : 70;
+        else if (sig.tipo === 'glorieta') x = sig.d % 2 ? -90 : 90;
+        else if (sig.tipo === 'especial' || sig.tipo === 'grupo') x = sig.x * 0.8;
+        const p = proy(x, lider.d);
+        return p ? juego.aCss(p[0], H * 0.75) : null;
       };
       if (fase === 'intro') {
-        actualizarMiembros(dt);
-        if (tf > 1.1 && (juego.entrada.toques.length || juego.entrada.abajo)) { fase = 'marcha'; tf = 0; juego.audio.sfx('silbato'); }
-        return;
+        if (tf > 0.9 && (juego.entrada.toques.length || juego.entrada.abajo)) { fase = 'marcha'; tf = 0; juego.audio.sfx('silbato'); }
       }
       if (fase === 'marcha') actualizarMarcha(dt);
-      else { lider.vx = 0; if (n === 2) lider.x = damp(lider.x, W / 2, 2, dt); }
+      else if (n === 2 && fase !== 'intro') lider.x = damp(lider.x, 0, 2, dt);
+      // La cámara sigue a la cabecera (y en el final se aleja un poco).
+      cam.zLider = damp(cam.zLider, fase === 'ritmo' || fase === 'cierre' ? 560 : 470, 1.5, dt);
+      cam.lleno = damp(cam.lleno, clamp(miembros.length / 110, 0, 1), 1.2, dt);
+      disponerCamara();
+      const dAntes = cam.d;
+      cam.d = lider.d - cam.zLider;
+      cam.x = damp(cam.x, lider.x * 0.45, 3, dt);
+      // El humo fluye con la perspectiva al avanzar la cámara.
+      const avance = cam.d - dAntes;
+      if (avance) for (const p of humo.puffs) { const k = (p.y - cam.horizonte) / (cam.h * cam.F); p.y += (p.y - cam.horizonte) * k * avance; p.x += (p.x - W / 2) * k * avance; }
+      humo.actualizar(dt, tarde ? 14 : 8);
       actualizarMiembros(dt);
-      contador = damp(contador, personasReales(), 3, dt);
+      contador = damp(contador, personas, 4, dt);
+      if (Math.floor(juego.t * 2) !== Math.floor((juego.t - dt) * 2)) juego.audio.multitud(clamp(0.2 + personas / 3500, 0.2, 1));
       if (fase === 'llegada') {
         if (tf > 0.6 && r() < dt * 2) saltar(0.15, 200);
         if (n === 2 && tf > 2.2) iniciarRitmo();
-        else if (n === 1 && tf > 2.2 && juego.entrada.toques.length) juego.siguiente();
-        return;
-      }
-      if (fase === 'ritmo') { if (juego.debug) window.__ritmoInfo = () => ritmo; actualizarRitmo(); return; }
-      if (fase === 'cierre') {
-        if (tf > 4.5 && juego.entrada.toques.length) juego.siguiente();
-      }
+        else if (n === 1 && tf > 2.6 && juego.entrada.toques.length) juego.siguiente();
+      } else if (fase === 'ritmo') { if (juego.debug) window.__ritmoInfo = () => ritmo; actualizarRitmo(); }
+      else if (fase === 'cierre' && tf > 4.4 && juego.entrada.toques.length) juego.siguiente();
     },
     dibujar(ctx) {
-      dibujaMundo(ctx);
-      dibujaGente(ctx);
+      ctx.save();
+      sacudida.aplicar(ctx, juego.t);
+      dibujaCielo(ctx);
+      dibujaSuelo(ctx);
+      dibujaEscena(ctx);
+      humo.dibujar(ctx);
+      ctx.restore();
+      etalonar(ctx, W, H, tarde ? { arriba: '#ff9a5c', abajo: '#5a3c8a', fuerza: 0.35, vineta: 0.42 } : { arriba: '#ffe2a0', abajo: '#86cd55', fuerza: 0.22, vineta: 0.3 });
       part.dibujar(ctx);
       dibujaHUD(ctx);
-      if (banner) dibujaBanner(ctx);
-      if (fase === 'intro') dibujaIntro(ctx);
-      if (fase === 'llegada' && n === 1 && tf > 1.2) dibujaFinMani1(ctx);
+      if (rotuloActual) dibujaRotulo(ctx);
+      if (fase === 'intro' && tf > 0.6) dibujaIntro(ctx);
+      if (fase === 'llegada' && n === 1 && tf > 1) dibujaFinMani1(ctx);
       if (fase === 'ritmo') dibujaRitmo(ctx);
       if (fase === 'cierre') dibujaCierre(ctx);
     },
   };
 
   // ======================= Dibujo =======================
-  function dibujaMundo(ctx) {
-    const yTop = lider.y + yLider() + 40; // y de mundo en lo alto de la pantalla
-    const yBot = lider.y - (H - yLider()) - 40;
-    // Asfalto.
-    ctx.fillStyle = '#8e9a96';
-    ctx.fillRect(0, 0, W, H);
-    for (const t of tramos) {
-      if (t.hasta < yBot || t.desde > yTop) continue;
-      const sy0 = pantallaY(t.hasta), sy1 = pantallaY(t.desde);
-      dibujaTramo(ctx, t, sy0, sy1);
+  function dibujaCielo(ctx) {
+    const g = ctx.createLinearGradient(0, -20, 0, cam.horizonte + 30);
+    g.addColorStop(0, cielo[0]); g.addColorStop(0.45, cielo[1]); g.addColorStop(0.8, cielo[2]); g.addColorStop(1, cielo[3]);
+    ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, cam.horizonte + 60);
+    // Sol.
+    const sx = W * (tarde ? 0.72 : 0.78), sy = cam.horizonte * (tarde ? 0.86 : 0.38);
+    const gs = ctx.createRadialGradient(sx, sy, 4, sx, sy, tarde ? 120 : 70);
+    gs.addColorStop(0, tarde ? 'rgba(255,230,160,1)' : 'rgba(255,250,220,1)'); gs.addColorStop(0.2, tarde ? 'rgba(255,200,120,.7)' : 'rgba(255,245,200,.5)'); gs.addColorStop(1, 'rgba(255,200,120,0)');
+    ctx.fillStyle = gs; ctx.fillRect(sx - 130, sy - 130, 260, 260);
+    // Nubes alargadas.
+    ctx.fillStyle = tarde ? 'rgba(255,190,170,.35)' : 'rgba(255,255,255,.55)';
+    for (let i = 0; i < 4; i++) {
+      const x = ((i * 137 + juego.t * (4 + i)) % (W + 200)) - 100, y = 18 + i * cam.horizonte * 0.17;
+      elipse(ctx, x, y, 60 + i * 12, 7 + (i % 2) * 3); ctx.fill(); elipse(ctx, x + 30, y - 5, 34, 7); ctx.fill();
     }
-    // Grupos en las aceras (de frente).
-    for (const g of grupos) {
-      if (g.unido) continue;
-      const sy = pantallaY(g.y);
-      if (sy < -80 || sy > H + 60) continue;
-      dibujaGrupo(ctx, g, sy);
-    }
+    // Perfil de Madrid al fondo (cúpulas y torres).
+    ctx.fillStyle = tarde ? 'rgba(80,50,90,.55)' : 'rgba(110,140,150,.45)';
+    const hz = cam.horizonte + 6;
+    ctx.beginPath(); ctx.moveTo(0, hz);
+    const perfil = [[0, 10], [40, 14], [62, 30], [70, 30], [74, 44], [78, 30], [96, 26], [150, 18], [168, 34], [172, 52], [176, 34], [196, 22], [236, 20], [250, 38], [262, 38], [262, 48], [270, 48], [276, 56], [282, 48], [290, 48], [290, 38], [302, 38], [314, 22], [360, 16], [400, 12]];
+    for (const [x, h] of perfil) ctx.lineTo((x / 400) * W, hz - h);
+    ctx.lineTo(W, hz); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(W * 0.43, hz - 52, 7, Math.PI, TAU); ctx.fill();
   }
 
-  function dibujaTramo(ctx, t, sy0, sy1) {
-    const h = sy1 - sy0;
-    // Aceras y edificios a los lados.
-    ctx.fillStyle = '#d8d2c4'; ctx.fillRect(0, sy0, CALLE.x0 + 34, h); ctx.fillRect(CALLE.x1 - 34, sy0, W - CALLE.x1 + 34, h);
-    ctx.fillStyle = 'rgba(15,53,34,.08)';
-    for (let yy = Math.floor(sy0 / 22) * 22; yy < sy1; yy += 22) { ctx.fillRect(0, yy, CALLE.x0 + 34, 1); ctx.fillRect(CALLE.x1 - 34, yy, W, 1); }
-    // Bordillo.
-    ctx.fillStyle = '#b9b2a2'; ctx.fillRect(CALLE.x0 + 32, sy0, 4, h); ctx.fillRect(CALLE.x1 - 36, sy0, 4, h);
-    // Tejados madrileños en los bordes.
-    dibujaTejados(ctx, t, sy0, sy1);
-    // Líneas de carril.
-    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 3; ctx.setLineDash([22, 26]);
-    ctx.lineDashOffset = -(lider.y % 48);
-    if (t.tipo === 'calle' || t.tipo === 'salida') { ctx.beginPath(); ctx.moveTo(W / 2, sy0); ctx.lineTo(W / 2, sy1); ctx.stroke(); }
-    ctx.setLineDash([]);
-    // Árboles en las aceras (copas vistas desde arriba).
-    if (t.tipo === 'calle' || t.tipo === 'salida') {
-      for (let k = Math.ceil(t.desde / 90) * 90; k < t.hasta; k += 90) {
-        const sy = pantallaY(k);
-        if (sy < sy0 - 30 || sy > sy1 + 30) continue;
-        arbol(ctx, CALLE.x0 + 14, sy, 20 + (k % 7)); arbol(ctx, CALLE.x1 - 14, sy - 40, 19 + (k % 5));
+  function cuad(ctx, a, b, c, d, color) {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill();
+  }
+
+  function dibujaSuelo(ctx) {
+    const hz = cam.horizonte;
+    const cerca = cam.d + 41, lejos = cam.d + 8000;
+    ctx.fillStyle = tarde ? '#6b5a6e' : '#a8a99f'; ctx.fillRect(-20, hz, W + 40, H - hz + 20);
+    const banda = (x0, x1, color) => cuad(ctx, proy(x0, cerca), proy(x1, cerca), proy(x1, lejos), proy(x0, lejos), color);
+    banda(-FACHADA, FACHADA, tarde ? '#9d8a86' : '#d4cbb8');
+    banda(-CALZADA - 4, CALZADA + 4, tarde ? '#5e5568' : '#8f9893');
+    // Reflejo del sol en el asfalto.
+    const gl = ctx.createLinearGradient(0, hz, 0, H);
+    gl.addColorStop(0, tarde ? 'rgba(255,170,100,.35)' : 'rgba(255,250,220,.25)'); gl.addColorStop(1, 'rgba(255,170,100,0)');
+    ctx.fillStyle = gl; ctx.fillRect(0, hz, W, H - hz);
+    // Línea central discontinua y juntas de las baldosas.
+    const paso = 60;
+    for (let d = Math.floor(cerca / paso) * paso; d < cam.d + 2600; d += paso) {
+      if (d - cam.d < 41) continue;
+      if (Math.floor(d / paso) % 2 === 0) {
+        const a = proy(-3, d), b = proy(3, d), c = proy(3, d + paso * 0.6), e = proy(-3, d + paso * 0.6);
+        if (a && c) cuad(ctx, a, b, c, e, 'rgba(255,255,255,.5)');
+      }
+      ctx.strokeStyle = 'rgba(80,60,40,.12)'; ctx.lineWidth = 1;
+      for (const lado of [-1, 1]) { const a = proy(lado * (CALZADA + 4), d), b = proy(lado * FACHADA, d); if (a && b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); } }
+    }
+    // Pasos de cebra antes de cada glorieta.
+    for (const c of cosas) if (c.tipo === 'glorieta') {
+      for (let x = -CALZADA + 8; x < CALZADA - 8; x += 20) {
+        const a = proy(x, c.d - 150), b = proy(x + 11, c.d - 150), cc = proy(x + 11, c.d - 128), e = proy(x, c.d - 128);
+        if (a && cc) cuad(ctx, a, b, cc, e, 'rgba(255,255,255,.6)');
       }
     }
-    if (t.obras) dibujaVallas(ctx, t);
-    if (t.tipo === 'glorieta') dibujaGlorieta(ctx, t);
-    if (t.tipo === 'obrasMedio') dibujaObrasMedio(ctx, t);
-    if (t.tipo === 'salida') dibujaSalida(ctx, t, sy0, sy1);
-    if (t.lugar === 'metropolis') dibujaMetropolis(ctx, t);
-    if (t.tipo === 'meta') dibujaMeta(ctx, t, sy0, sy1);
-    // Pasos de cebra al empezar cada tramo.
-    if (t.tipo !== 'meta') {
-      const sy = pantallaY(t.desde);
-      ctx.fillStyle = 'rgba(255,255,255,.7)';
-      for (let x = CALLE.x0 + 40; x < CALLE.x1 - 40; x += 16) ctx.fillRect(x, sy - 22, 9, 20);
-    }
   }
 
-  function dibujaTejados(ctx, t, sy0, sy1) {
-    const colores = ['#c8754e', '#b9654a', '#a9a39a', '#d08b5c', '#9c968c'];
-    for (const lado of [0, 1]) {
-      let k = Math.floor(t.desde / 110) * 110;
-      for (; k < t.hasta; k += 110) {
-        const a = pantallaY(k + 110), b = pantallaY(k);
-        if (b < sy0 || a > sy1) continue;
-        const x = lado ? W - 22 : 0;
-        const c = colores[(k / 110 + lado * 2) % colores.length | 0];
-        ctx.fillStyle = c; ctx.fillRect(x, Math.max(a, sy0) + 3, 22, Math.min(b, sy1) - Math.max(a, sy0) - 6);
-        ctx.fillStyle = 'rgba(0,0,0,.12)'; ctx.fillRect(lado ? x : x + 16, Math.max(a, sy0) + 3, 6, Math.min(b, sy1) - Math.max(a, sy0) - 6);
-        // Balcón con vecina que aplaude (y alguna cacerolada).
-        if ((k / 110) % 3 === lado) {
-          const by = (a + b) / 2;
-          ctx.fillStyle = '#0f3522'; ctx.fillRect(lado ? W - 26 : 18, by - 10, 8, 20);
-          if ((k / 110) % 2) { const dy = Math.sin(juego.t * 14 + k) * 2; ctx.fillStyle = '#c0c6c4'; circulo(ctx, lado ? W - 31 : 31, by + dy, 4.5); ctx.fill(); }
+  // Todo lo que tiene profundidad, ordenado de lejos a cerca.
+  function dibujaEscena(ctx) {
+    const lista = [];
+    for (const b of bloques) if (b.d1 > cam.d + 40 && b.d0 < cam.d + 3200) lista.push({ z: Math.max(b.d0, cam.d + 41) - cam.d + 0.5, dib: () => dibujaBloque(ctx, b) });
+    // Lo que la cabecera ya ha dejado atrás desaparece (salvo las vallas, que son largas).
+    for (const c of cosas) if (c.d < cam.d + 3200 && (c.tipo === 'obras' ? c.d + c.largo > lider.d - 60 : c.d > lider.d - 30)) lista.push({ z: c.d - cam.d, dib: () => dibujaCosa(ctx, c) });
+    if (n === 2) lista.push({ z: dConsejeria - cam.d, dib: () => dibujaConsejeria(ctx) });
+    for (const m of miembros) { const z = m.d - cam.d; if (z > 40) lista.push({ z, dib: () => dibujaMiembro(ctx, m) }); }
+    lista.push({ z: lider.d - cam.d - 0.1, dib: () => dibujaLider(ctx) });
+    if (perro.activo) lista.push({ z: perro.d - cam.d, dib: () => dibujaPerro(ctx) });
+    pancartas.forEach((id, i) => { const d = lider.d - 18 - (i + 0.9) * FILA * 2.2; lista.push({ z: d - cam.d - 0.2, dib: () => dibujaPancartaCabecera(ctx, id, d, i) }); });
+    lista.sort((a, b) => b.z - a.z);
+    let bruma = false;
+    for (const o of lista) {
+      if (!bruma && o.z < 1100) { dibujaBruma(ctx); bruma = true; }
+      o.dib();
+    }
+    if (!bruma) dibujaBruma(ctx);
+  }
+  function dibujaBruma(ctx) {
+    // Perspectiva aérea: lo lejano se funde con el cielo.
+    const y1 = cam.horizonte + (cam.h * cam.F) / 1100;
+    const g = ctx.createLinearGradient(0, cam.horizonte - 40, 0, y1);
+    g.addColorStop(0, alfa(cielo[3], 0.65)); g.addColorStop(1, alfa(cielo[3], 0));
+    ctx.fillStyle = g; ctx.fillRect(-20, cam.horizonte - 40, W + 40, y1 - cam.horizonte + 40);
+  }
+
+  function poli(ctx, pts, color, borde) {
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+    if (borde) { ctx.strokeStyle = borde; ctx.lineWidth = 1; ctx.stroke(); }
+  }
+
+  function dibujaBloque(ctx, b) {
+    const x = b.lado * FACHADA;
+    const d0 = Math.max(b.d0, cam.d + 41), d1 = b.d1;
+    const A = proy(x, d0, 0), B = proy(x, d1, 0), Cc = proy(x, d1, b.alto), D = proy(x, d0, b.alto);
+    if (!A || !B) return;
+    const lit = tarde ? mezcla(b.color, '#ff9a6a', 0.25) : b.color;
+    poli(ctx, [A, B, Cc, D], b.lado < 0 ? mezcla(lit, '#ffffff', 0.08) : mezcla(lit, '#3a2a40', 0.12));
+    const E = proy(x, d0, b.alto - 10), F = proy(x, d1, b.alto - 10);
+    poli(ctx, [D, Cc, F, E], mezcla(lit, '#0f1a14', 0.18));
+    const sMed = (A[2] + B[2]) / 2;
+    if (sMed < (juego.calidad ? 0.22 : 0.4)) return;
+    // Ventanas con contraventanas verdes y balcones de forja.
+    const pisos = Math.floor((b.alto - 40) / 44);
+    for (let p = 0; p < pisos; p++) {
+      const h0 = 26 + p * 44, h1 = h0 + 26;
+      for (let d = b.d0 + 14; d < b.d1 - 22; d += 38) {
+        if (d < cam.d + 45) continue;
+        const v = [proy(x, d, h0), proy(x, d + 18, h0), proy(x, d + 18, h1), proy(x, d, h1)];
+        if (v.some(q => !q)) continue;
+        const enc = tarde && ((d * 7 + p * 13 + b.semilla) % 5) < 2;
+        poli(ctx, v, enc ? '#ffd98a' : tarde ? '#4a3f5e' : '#5b6f78');
+        if (sMed > 0.32) { const cv = [proy(x, d - 5, h0), v[0], v[3], proy(x, d - 5, h1)]; if (!cv.some(q => !q)) poli(ctx, cv, '#3f6b4c'); }
+        if (sMed > 0.36 && p > 0 && (p + Math.floor(d / 38)) % 2 === 0) {
+          const bal = [proy(x - b.lado * 6, d - 6, h0 - 2), proy(x - b.lado * 6, d + 24, h0 - 2), proy(x - b.lado * 6, d + 24, h0 + 9), proy(x - b.lado * 6, d - 6, h0 + 9)];
+          if (!bal.some(q => !q)) {
+            ctx.strokeStyle = 'rgba(20,20,25,.75)'; ctx.lineWidth = Math.max(0.6, sMed * 1.1);
+            ctx.beginPath(); ctx.moveTo(bal[0][0], bal[0][1]); ctx.lineTo(bal[1][0], bal[1][1]); ctx.moveTo(bal[3][0], bal[3][1]); ctx.lineTo(bal[2][0], bal[2][1]);
+            for (let k = 0; k <= 4; k++) { const t = k / 4; ctx.moveTo(lerp(bal[0][0], bal[1][0], t), lerp(bal[0][1], bal[1][1], t)); ctx.lineTo(lerp(bal[3][0], bal[2][0], t), lerp(bal[3][1], bal[2][1], t)); }
+            ctx.stroke();
+          }
+          // Vecina asomada que aplaude.
+          if (b.vecinos && ((d + p * 31 + b.semilla) % 4) < 1) {
+            const q = proy(x - b.lado * 4, d + 9, h0 + 12);
+            if (q) {
+              const s = q[2] * 0.5;
+              ctx.save(); ctx.translate(q[0], q[1]); ctx.scale(s, s);
+              ctx.fillStyle = '#eab996'; circulo(ctx, 0, -12, 7); ctx.fill();
+              ctx.fillStyle = b.ropa; ctx.fillRect(-7, -6, 14, 10);
+              const ap = Math.sin(juego.t * 14 + d) * 3;
+              ctx.fillStyle = '#eab996'; circulo(ctx, -5 + ap, -20, 3); ctx.fill(); circulo(ctx, 5 - ap, -20, 3); ctx.fill();
+              ctx.restore();
+            }
+          }
         }
       }
     }
-  }
-  function arbol(ctx, x, y, r0) {
-    sombra(ctx, x + 5, y + 6, r0 * 0.9, r0 * 0.5, 0.15);
-    ctx.fillStyle = '#4f9a3f'; circulo(ctx, x, y, r0); ctx.fill();
-    ctx.fillStyle = '#62ad4c'; circulo(ctx, x - r0 * 0.25, y - r0 * 0.25, r0 * 0.7); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.12)'; circulo(ctx, x - r0 * 0.35, y - r0 * 0.4, r0 * 0.3); ctx.fill();
-  }
-  function dibujaVallas(ctx, t) {
-    // Obras con vallas amarillas: la calle se estrecha.
-    for (let k = t.desde; k < t.hasta; k += 12) {
-      const l = limites(k);
-      const sy = pantallaY(k);
-      if (sy < -20 || sy > H + 20) continue;
-      if (l.x0 > CALLE.x0 + 4) {
-        ctx.fillStyle = (k / 12) % 2 ? '#f2b705' : '#16221b'; ctx.fillRect(l.x0 - 6, sy - 6, 7, 12); ctx.fillRect(l.x1 - 1, sy - 6, 7, 12);
-        ctx.fillStyle = '#c9b79a'; ctx.fillRect(CALLE.x0, sy - 6, l.x0 - CALLE.x0 - 6, 12); ctx.fillRect(l.x1 + 6, sy - 6, CALLE.x1 - l.x1 - 6, 12);
+    // Pancarta colgada del balcón.
+    if (b.pancarta && sMed > 0.3) {
+      const dm = (b.d0 + b.d1) / 2;
+      const q = [proy(x - b.lado * 3, dm - 40, 70), proy(x - b.lado * 3, dm + 40, 70), proy(x - b.lado * 3, dm + 40, 108), proy(x - b.lado * 3, dm - 40, 108)];
+      if (!q.some(z => !z)) {
+        poli(ctx, q, '#f7f8f3', 'rgba(15,53,34,.6)');
+        const s = (q[0][2] + q[1][2]) / 2;
+        ctx.save(); ctx.translate((q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2);
+        ctx.transform(1, (q[1][1] - q[0][1]) / (q[1][0] - q[0][0] || 1), 0, 1, 0, 0);
+        ctx.font = `400 ${11 * s}px ${fuentes.rotulador}`; ctx.fillStyle = '#174d32'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('EDUCACIÓN', 0, -6 * s); ctx.fillText('PÚBLICA', 0, 7 * s);
+        ctx.restore();
       }
     }
-    const mid = (t.desde + t.hasta) / 2;
-    const sy = pantallaY(mid);
-    cartel(ctx, ['OBRAS', 'FASE 1 DE 9'], CALLE.x0 + 30, sy, 56, 30, { t: juego.t, color: '#f2b705' });
-    // Grúa.
-    ctx.strokeStyle = '#f2b705'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(CALLE.x1 - 10, sy + 30); ctx.lineTo(CALLE.x1 - 10, sy - 70); ctx.lineTo(CALLE.x1 - 110, sy - 70); ctx.stroke();
-    ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(CALLE.x1 - 80, sy - 70); ctx.lineTo(CALLE.x1 - 80, sy - 40 + Math.sin(juego.t) * 4); ctx.stroke();
-  }
-  function dibujaGlorieta(ctx, t) {
-    const cy = pantallaY((t.desde + t.hasta) / 2);
-    const R = t.radio;
-    // Calzada circular más clara y jardín o fuente en el centro.
-    ctx.fillStyle = 'rgba(255,255,255,.08)'; circulo(ctx, W / 2, cy, R + 60); ctx.fill();
-    sombra(ctx, W / 2 + 6, cy + 8, R, R * 0.9, 0.2);
-    if (t.lugar === 'atocha-glorieta') {
-      ctx.fillStyle = '#62ad4c'; circulo(ctx, W / 2, cy, R); ctx.fill();
-      ctx.strokeStyle = '#d8d2c4'; ctx.lineWidth = 6; circulo(ctx, W / 2, cy, R - 3); ctx.stroke();
-      ctx.fillStyle = '#4f9a3f'; for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU + 0.3; circulo(ctx, W / 2 + Math.cos(a) * R * 0.55, cy + Math.sin(a) * R * 0.55, 12); ctx.fill(); }
-      ctx.fillStyle = '#ffcf33'; for (let i = 0; i < 14; i++) { const a = (i / 14) * TAU; circulo(ctx, W / 2 + Math.cos(a) * R * 0.85, cy + Math.sin(a) * R * 0.85, 2.4); ctx.fill(); }
-    } else {
-      // Fuente: pilón, agua y estatua.
-      ctx.fillStyle = '#e8e2d4'; circulo(ctx, W / 2, cy, R); ctx.fill();
-      ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.5; circulo(ctx, W / 2, cy, R); ctx.stroke();
-      ctx.fillStyle = '#6fb7d6'; circulo(ctx, W / 2, cy, R - 9); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.5;
-      for (let i = 0; i < 3; i++) { const rr2 = ((juego.t * 14 + i * 18) % (R - 14)) + 6; ctx.globalAlpha = 1 - rr2 / R; circulo(ctx, W / 2, cy, rr2); ctx.stroke(); }
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#e8e2d4'; circulo(ctx, W / 2, cy, 18); ctx.fill(); ctx.strokeStyle = '#0f3522'; ctx.stroke();
-      if (t.lugar === 'neptuno') estatuaNeptuno(ctx, W / 2, cy);
-      else estatuaCibeles(ctx, W / 2, cy);
-    }
-    // Rótulo del lugar.
-    const nombre = { 'atocha-glorieta': 'Glorieta de Atocha', neptuno: 'Plaza de Neptuno', cibeles: 'Plaza de Cibeles' }[t.lugar];
-    if (nombre) placa(ctx, nombre, W / 2, cy - R - 18);
-  }
-  function placa(ctx, txt, x, y) {
-    ctx.font = `700 11px ${fuentes.texto}`;
-    const w = ctx.measureText(txt).width + 16;
-    ctx.fillStyle = '#244f3a'; rr(ctx, x - w / 2, y - 9, w, 18, 3); ctx.fill();
-    ctx.strokeStyle = '#f7f8f3'; ctx.lineWidth = 1; rr(ctx, x - w / 2 + 2, y - 7, w - 4, 14, 2); ctx.stroke();
-    ctx.fillStyle = '#f7f8f3'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, x, y + 0.5);
-  }
-  function estatuaNeptuno(ctx, x, y) {
-    ctx.fillStyle = '#d9d4c6'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.5;
-    elipse(ctx, x, y + 2, 13, 8); ctx.fill(); ctx.stroke();
-    circulo(ctx, x, y - 14, 6); ctx.fill(); ctx.stroke();
-    rr(ctx, x - 6, y - 9, 12, 12, 4); ctx.fill(); ctx.stroke();
-    // Tridente.
-    ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 9, y + 2); ctx.lineTo(x + 9, y - 30); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x + 4, y - 26); ctx.lineTo(x + 4, y - 32); ctx.moveTo(x + 14, y - 26); ctx.lineTo(x + 14, y - 32); ctx.moveTo(x + 4, y - 26); ctx.lineTo(x + 14, y - 26); ctx.stroke();
-  }
-  function estatuaCibeles(ctx, x, y) {
-    ctx.fillStyle = '#d9d4c6'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.5;
-    // Carro con dos leones.
-    rr(ctx, x - 12, y - 6, 24, 14, 4); ctx.fill(); ctx.stroke();
-    for (const l of [-1, 1]) { elipse(ctx, x + l * 7, y + 14, 5, 8); ctx.fill(); ctx.stroke(); circulo(ctx, x + l * 7, y + 22, 4); ctx.fill(); ctx.stroke(); }
-    circulo(ctx, x, y - 16, 6); ctx.fill(); ctx.stroke();
-    rr(ctx, x - 5, y - 12, 10, 10, 3); ctx.fill(); ctx.stroke();
-  }
-  function dibujaObrasMedio(ctx, t) {
-    const is = { x0: W / 2 - 62, x1: W / 2 + 62 };
-    const a = pantallaY(t.hasta - 70), b = pantallaY(t.desde + 70);
-    ctx.fillStyle = '#c9b79a'; ctx.fillRect(is.x0, a, is.x1 - is.x0, b - a);
-    ctx.fillStyle = 'rgba(120,90,50,.25)'; for (let i = 0; i < 6; i++) { elipse(ctx, is.x0 + 20 + (i * 37) % 90, a + 20 + (i * 53) % Math.max(20, b - a - 40), 12, 6); ctx.fill(); }
-    for (let yy = a; yy < b; yy += 12) { ctx.fillStyle = ((yy - a) / 12) % 2 < 1 ? '#f2b705' : '#16221b'; ctx.fillRect(is.x0 - 4, yy, 5, 12); ctx.fillRect(is.x1 - 1, yy, 5, 12); }
-    for (let xx = is.x0; xx < is.x1; xx += 12) { ctx.fillStyle = ((xx - is.x0) / 12) % 2 < 1 ? '#f2b705' : '#16221b'; ctx.fillRect(xx, a - 4, 12, 5); ctx.fillRect(xx, b - 1, 12, 5); }
-    // Hormigonera y cartel: la construcción por fases, en medio de Alcalá.
-    ctx.fillStyle = '#e0566c'; circulo(ctx, W / 2 - 20, (a + b) / 2 + 30, 14); ctx.fill(); ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.5; ctx.stroke();
-    cartel(ctx, ['OBRAS', 'FASE 3 DE 12', 'DESDE 2015'], W / 2 + 6, (a + b) / 2 - 6, 84, 44, { t: juego.t, color: '#f2b705' });
-  }
-  function dibujaSalida(ctx, t, sy0, sy1) {
-    if (t.lugar === 'atocha') {
-      // La estación de Atocha: bóveda de hierro y cristal a la izquierda.
-      const y0 = pantallaY(t.desde + 200), y1 = pantallaY(t.desde - 60);
-      ctx.fillStyle = '#b3543f'; ctx.fillRect(0, y0, CALLE.x0 + 22, y1 - y0);
-      ctx.fillStyle = '#9fc7d6'; rr(ctx, 4, y0 + 10, CALLE.x0 + 10, y1 - y0 - 20, 10); ctx.fill();
-      ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.2;
-      for (let yy = y0 + 18; yy < y1 - 10; yy += 10) { ctx.beginPath(); ctx.moveTo(4, yy); ctx.lineTo(CALLE.x0 + 14, yy); ctx.stroke(); }
-      placa(ctx, 'Atocha', CALLE.x0 + 70, pantallaY(t.desde + 60));
-    } else placa(ctx, 'Paseo del Prado', CALLE.x0 + 84, pantallaY(t.desde + 60));
-  }
-  function dibujaMetropolis(ctx, t) {
-    // El edificio Metrópolis: cúpula negra con la Victoria alada dorada.
-    const sy = pantallaY((t.desde + t.hasta) / 2);
-    ctx.fillStyle = '#efe6d2'; ctx.fillRect(W - 46, sy - 70, 46, 140);
-    ctx.fillStyle = '#1d2a33'; circulo(ctx, W - 22, sy, 26); ctx.fill();
-    ctx.strokeStyle = '#d6a93a'; ctx.lineWidth = 1.5; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(W - 22, sy - 26); ctx.lineTo(W - 22 + i * 10, sy + 26); ctx.stroke(); }
-    ctx.fillStyle = '#d6a93a'; circulo(ctx, W - 22, sy, 6); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(W - 22, sy - 4); ctx.lineTo(W - 36, sy - 12); ctx.lineTo(W - 24, sy); ctx.lineTo(W - 8, sy - 12); ctx.closePath(); ctx.fill();
-    placa(ctx, 'Calle de Alcalá', CALLE.x0 + 80, sy + 40);
-  }
-  function dibujaMeta(ctx, t, sy0, sy1) {
-    if (t.lugar === 'consejeria') {
-      // Fachada de la Consejería al fondo de la calle.
-      const fy = pantallaY(t.hasta - 40);
-      const base = pantallaY(t.desde + 300);
-      ctx.fillStyle = '#c9c0ad'; ctx.fillRect(20, base - 4, W - 40, 8);
-      ctx.fillStyle = '#e9dfc9'; ctx.fillRect(20, fy, W - 40, base - fy);
-      ctx.fillStyle = '#d7cbb1'; ctx.fillRect(20, fy, W - 40, 20);
-      ctx.fillStyle = '#b9ad93'; ctx.fillRect(20, fy + 20, W - 40, 4);
-      // Ventanas: se encienden con cada acierto del cántico.
-      const filas = 3, cols = 6;
-      for (let f = 0; f < filas; f++) for (let c = 0; c < cols; c++) {
-        const wx = 44 + c * ((W - 88) / (cols - 1)) - 14, wy = fy + 38 + f * ((base - fy - 120) / filas);
-        const i = f * cols + c;
-        const encendida = i < ventanas * 1.5;
-        ctx.fillStyle = '#0f3522'; rr(ctx, wx - 2, wy - 2, 32, 40, 3); ctx.fill();
-        ctx.fillStyle = encendida ? '#ffe28a' : '#58707a'; rr(ctx, wx, wy, 28, 36, 2); ctx.fill();
-        // Persiana.
-        const bajada = fase === 'cierre' && i === 8 ? clamp(tf / 2.5 - 0.4, 0, 1) : (encendida ? 0.35 : 0.6);
-        ctx.fillStyle = '#cbbd9e'; ctx.fillRect(wx, wy, 28, 36 * bajada);
-        ctx.strokeStyle = 'rgba(15,53,34,.2)'; ctx.lineWidth = 1; for (let k = 4; k < 36 * bajada; k += 4) { ctx.beginPath(); ctx.moveTo(wx, wy + k); ctx.lineTo(wx + 28, wy + k); ctx.stroke(); }
-        // Una silueta que se asoma y vuelve a esconderse.
-        if (fase === 'cierre' && i === 8 && tf > 0.6 && tf < 1.6) { ctx.fillStyle = 'rgba(15,53,34,.6)'; circulo(ctx, wx + 14, wy + 26, 6); ctx.fill(); }
+    // Bandera verde con el corro.
+    if (b.bandera && sMed > 0.28) {
+      const dm = b.d0 + 30;
+      const base = proy(x, dm, b.alto - 40), punta = proy(x - b.lado * 30, dm, b.alto - 30);
+      if (base && punta) {
+        ctx.strokeStyle = '#3b3b3b'; ctx.lineWidth = Math.max(1, sMed * 1.5); ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(punta[0], punta[1]); ctx.stroke();
+        const ond = Math.sin(juego.t * 4 + b.semilla) * 4 * sMed;
+        ctx.fillStyle = PAL.camiseta; ctx.beginPath(); ctx.moveTo(punta[0], punta[1]); ctx.lineTo(punta[0], punta[1] + 22 * sMed); ctx.quadraticCurveTo(punta[0] + b.lado * 14 * sMed, punta[1] + 18 * sMed + ond, punta[0] + b.lado * 28 * sMed, punta[1] + 20 * sMed); ctx.lineTo(punta[0] + b.lado * 28 * sMed, punta[1]); ctx.closePath(); ctx.fill();
+        dibujaCorroMini(ctx, punta[0] + b.lado * 13 * sMed, punta[1] + 10 * sMed, 5 * sMed, '#ffffff');
       }
-      // Puerta cerrada y bandera.
-      const px = W / 2 - 34, py = base - 92;
-      ctx.fillStyle = '#5a3c27'; rr(ctx, px, py, 68, 88, 30); ctx.fill();
-      ctx.strokeStyle = '#3e2818'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(W / 2, py + 10); ctx.lineTo(W / 2, py + 88); ctx.stroke();
-      ctx.fillStyle = '#d6a93a'; circulo(ctx, W / 2 - 6, py + 52, 3); ctx.fill(); circulo(ctx, W / 2 + 6, py + 52, 3); ctx.fill();
-      ctx.fillStyle = '#f7f8f3'; rr(ctx, W / 2 - 80, fy + 6, 160, 12, 2); ctx.fill();
-      ctx.font = `700 9px ${fuentes.texto}`; ctx.fillStyle = '#4a594f'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('CONSEJERÍA DE EDUCACIÓN', W / 2, fy + 12.5);
-    } else {
-      placa(ctx, 'Plaza de Cánovas del Castillo', W / 2, pantallaY(t.desde + 120));
     }
   }
 
-  function dibujaGrupo(ctx, g, sy) {
-    g.t += juego.dt;
-    if (g.tipo === 'perro') { dibujaPerro(ctx, g.x, sy, juego.t * 3, true); return; }
-    const gente = [...g.gente].sort((a, b) => a.dy - b.dy);
-    if (g.tipo === 'pancarta') {
-      const R = REIVINDICACIONES[g.id];
-      for (const q of gente) {
-        const qx = g.x + q.dx, qy = sy + q.dy;
-        if (q.brazos === 'cartel') cartel(ctx, '', qx + 9, qy - 46, 18, 16, { t: juego.t + q.dx, color: '#f7f8f3' }), icono(ctx, R.icono, qx + 9, qy - 54, 12);
-        dibujaPersona(ctx, q.p, { x: qx, y: qy, esc: 0.86, brazos: g.despide ? 'saluda' : q.brazos === 'cartel' ? 'uno' : 'puño', expr: g.despide ? 'normal' : 'gritando', t: juego.t + q.p.semilla, paso: Math.sin(juego.t * 4 + q.dx) * 0.2 });
-      }
-      // La pancarta delante del grupo.
-      pancarta(ctx, R.pancarta, g.x, sy - 30, 116, 36, { t: juego.t, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(g.id) + 1 });
-      if (!g.despide) {
-        // Flecha que invita a elegir.
-        const k = (Math.sin(juego.t * 5) + 1) / 2;
-        ctx.fillStyle = alfa('#0f3522', 0.8);
-        ctx.beginPath(); ctx.moveTo(g.x - 9, sy + 46 + k * 6); ctx.lineTo(g.x + 9, sy + 46 + k * 6); ctx.lineTo(g.x, sy + 36 + k * 6); ctx.closePath(); ctx.fill();
-      }
-      return;
-    }
-    for (const q of gente) {
-      const qx = g.x + q.dx, qy = sy + q.dy;
-      const p = q.p;
-      dibujaPersona(ctx, p, { x: qx, y: qy, esc: p.edad === 'niño' ? 0.92 : 0.86, brazos: p.tambor ? 'abajo' : q.brazos, expr: 'feliz', t: juego.t + p.semilla, salto: Math.max(0, Math.sin(juego.t * 6 + q.dx)) * 3 });
-      if (p.tambor) { ctx.fillStyle = '#e0566c'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.3; rr(ctx, qx - 9, qy - 30, 18, 14, 4); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#f7f8f3'; elipse(ctx, qx, qy - 30, 9, 3); ctx.fill(); ctx.stroke(); }
-      if (p.peineta) { ctx.fillStyle = '#16221b'; ctx.beginPath(); ctx.arc(qx, qy - 53, 9, Math.PI, TAU); ctx.fill(); ctx.fillStyle = '#e0566c'; circulo(ctx, qx + 7, qy - 48, 3); ctx.fill(); }
-    }
-    if (g.tipo === 'abuela') cartel(ctx, ['FUI MAESTRA', '40 AÑOS'], g.x - g.lado * 4, sy - 52, 52, 26, { t: juego.t });
-    if (g.tipo === 'familias') cartel(ctx, ['AMPA', 'CON LA PÚBLICA'], g.x + g.lado * 8, sy - 54, 56, 26, { t: juego.t + 1, color: '#ffcf33' });
+  // Puerta de pancarta: dos postes y una tela entre ellos.
+  function arco(ctx, d, x0, x1, alto, color, lineas, ico) {
+    const pa = proy(x0, d, 0), pb = proy(x1, d, 0), qa = proy(x0, d, alto), qb = proy(x1, d, alto);
+    if (!pa || !pb) return;
+    const s = pa[2];
+    ctx.strokeStyle = '#7d5a3c'; ctx.lineWidth = 5 * s;
+    ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(qa[0], qa[1] - 4 * s); ctx.moveTo(pb[0], pb[1]); ctx.lineTo(qb[0], qb[1] - 4 * s); ctx.stroke();
+    pancarta(ctx, lineas, (pa[0] + pb[0]) / 2, qa[1], pb[0] - pa[0], 52 * s, { t: juego.t, color, palos: false, icono: ico, semilla: (d % 7) + 1, tamMax: 60 });
   }
-  function dibujaPerro(ctx, x, y, t, deFrente) {
-    sombra(ctx, x, y + 2, 12, 4);
-    ctx.save(); ctx.translate(x, y);
+
+  function dibujaCosa(ctx, c) {
+    if (c.tipo === 'puerta') {
+      for (const [lado, x0, x1, nombre] of [[c.izq, -CALZADA + 4, -4, 'izq'], [c.der, 4, CALZADA - 4, 'der']]) {
+        if (c.hecha && c.elegido !== nombre) continue;
+        const color = lado.op === 'caja' ? '#ffcf33' : lado.op === '×' ? '#86cd55' : '#f7f8f3';
+        const txt = lado.op === 'caja' ? ['CAJA DE', 'RESISTENCIA'] : [`${lado.op}${String(lado.v).replace('.', ',')}`, lado.txt];
+        ctx.save(); if (c.hecha) ctx.globalAlpha = 0.5;
+        arco(ctx, c.d, x0, x1, 92, color, txt, lado.op === 'caja' ? 'hucha' : null);
+        ctx.restore();
+      }
+    } else if (c.tipo === 'sueldo') {
+      arco(ctx, c.d, -CALZADA + 4, CALZADA - 4, 92, '#e0566c', ['DÍA SIN SUELDO'], 'euro');
+      const p = proy(0, c.d, 22);
+      if (p && !c.hecha) {
+        ctx.font = `800 ${12 * p[2]}px ${fuentes.display}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3 * p[2]; ctx.strokeStyle = '#0f3522'; ctx.fillStyle = escudo ? C.amarillo : '#ffffff';
+        const t = escudo ? 'la caja te cubre' : '−35 %';
+        ctx.strokeText(t, p[0], p[1]); ctx.fillText(t, p[0], p[1]);
+      }
+    } else if (c.tipo === 'obras') {
+      const x0 = c.lado > 0 ? -6 : -CALZADA, x1 = c.lado > 0 ? CALZADA : 6;
+      for (let d = c.d + c.largo; d >= c.d; d -= 22) {
+        const a = proy(x0, d, 0), b = proy(x1, d, 0), e = proy(x1, d, 26), f = proy(x0, d, 26);
+        if (!a || !b) continue;
+        poli(ctx, [a, b, e, f], 'rgba(201,183,154,.92)');
+        const s = a[2];
+        const borde = c.lado > 0 ? a : b;
+        ctx.fillStyle = ((d / 22) | 0) % 2 ? '#f2b705' : '#16221b'; ctx.fillRect(borde[0] - 3 * s, borde[1] - 26 * s, 6 * s, 26 * s);
+      }
+      const p = proy(c.lado > 0 ? 60 : -60, c.d - 6, 40);
+      if (p) cartel(ctx, ['OBRAS', 'FASE 3 DE 12'], p[0], p[1] + 30 * p[2], 70 * p[2], 32 * p[2], { t: juego.t, color: '#f2b705' });
+    } else if (c.tipo === 'glorieta') {
+      dibujaFuente(ctx, c);
+      if (!c.hecha) pares[c.par].forEach((id, i) => grupoPancarta(ctx, id, i ? 92 : -92, c.d - 40));
+      else { const i = pares[c.par].indexOf(c.elegida); grupoPancarta(ctx, pares[c.par][1 - i], i ? -92 : 92, c.d - 40, true); }
+    } else if (c.tipo === 'especial' && !c.unido) dibujaEspecial(ctx, c);
+    else if (c.tipo === 'grupo' && !c.unido) {
+      const p = proy(c.x, c.d, 0);
+      if (!p) return;
+      const s = p[2] * 0.6;
+      c.gente.forEach((per, i) => dibujaPersona(ctx, per, { x: p[0] + (i - c.gente.length / 2) * 15 * s * -Math.sign(c.x), y: p[1] + (i % 2) * 8 * s, esc: s, brazos: i % 2 ? 'saluda' : 'puño', expr: 'gritando', t: juego.t + i, luz: luzBorde }));
+      ctx.font = `800 ${16 * s}px ${fuentes.display}`; ctx.fillStyle = C.amarillo; ctx.textAlign = 'center';
+      ctx.lineWidth = 4 * s; ctx.strokeStyle = '#0f3522'; ctx.strokeText(`+${c.cuantos}`, p[0], p[1] - 76 * s); ctx.fillText(`+${c.cuantos}`, p[0], p[1] - 76 * s);
+    }
+  }
+
+  function dibujaFuente(ctx, c) {
+    const p = proy(0, c.d, 0);
+    if (!p) return;
+    const s = p[2];
+    ctx.fillStyle = 'rgba(15,53,34,.25)'; elipse(ctx, p[0] + 6 * s, p[1] + 4 * s, 66 * s, 16 * s); ctx.fill();
+    ctx.fillStyle = '#e8e2d4'; elipse(ctx, p[0], p[1], 64 * s, 15 * s); ctx.fill();
+    ctx.fillStyle = '#d4cdbd'; ctx.fillRect(p[0] - 64 * s, p[1] - 12 * s, 128 * s, 12 * s);
+    ctx.fillStyle = '#e8e2d4'; elipse(ctx, p[0], p[1] - 12 * s, 64 * s, 15 * s); ctx.fill();
+    ctx.fillStyle = '#6fb7d6'; elipse(ctx, p[0], p[1] - 12 * s, 56 * s, 12 * s); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    for (let i = 0; i < 3; i++) { const k = (juego.t * 0.6 + i / 3) % 1; ctx.globalAlpha = 1 - k; elipse(ctx, p[0], p[1] - 12 * s, 54 * s * k, 11 * s * k); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    // Estatua en silueta.
+    ctx.fillStyle = tarde ? '#5d4a5a' : '#cfc8b6'; ctx.strokeStyle = 'rgba(15,53,34,.7)'; ctx.lineWidth = 1.2;
+    rr(ctx, p[0] - 10 * s, p[1] - 60 * s, 20 * s, 48 * s, 4 * s); ctx.fill(); ctx.stroke();
+    circulo(ctx, p[0], p[1] - 70 * s, 9 * s); ctx.fill(); ctx.stroke();
+    if (c.lugar.includes('Neptuno')) {
+      ctx.lineWidth = 2.5 * s; ctx.beginPath();
+      ctx.moveTo(p[0] + 14 * s, p[1] - 30 * s); ctx.lineTo(p[0] + 14 * s, p[1] - 96 * s);
+      ctx.moveTo(p[0] + 8 * s, p[1] - 98 * s); ctx.lineTo(p[0] + 8 * s, p[1] - 90 * s); ctx.lineTo(p[0] + 20 * s, p[1] - 90 * s); ctx.lineTo(p[0] + 20 * s, p[1] - 98 * s);
+      ctx.stroke();
+    }
+    if (c.lugar.includes('Cibeles')) for (const l of [-1, 1]) { elipse(ctx, p[0] + l * 18 * s, p[1] - 22 * s, 9 * s, 12 * s); ctx.fill(); ctx.stroke(); }
+    ctx.font = `700 ${11 * Math.min(1.2, s)}px ${fuentes.texto}`;
+    const tw = ctx.measureText(c.lugar).width + 14;
+    ctx.fillStyle = '#244f3a'; rr(ctx, p[0] - tw / 2, p[1] - 128 * s - 10, tw, 18, 3); ctx.fill();
+    ctx.fillStyle = '#f7f8f3'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(c.lugar, p[0], p[1] - 128 * s - 1);
+  }
+
+  function dibujaEspecial(ctx, c) {
+    const p = proy(c.x, c.d, 0);
+    if (!p) return;
+    const s = p[2] * 0.62;
+    if (c.que === 'perro') { dibujaPerroEn(ctx, p[0], p[1], s * 1.3, true); return; }
+    const tipos = { batucada: { n: 5, tambor: true }, coro: { n: 4, peineta: true }, maestra: { n: 1 } }[c.que];
+    for (let i = 0; i < tipos.n; i++) {
+      const per = c.que === 'maestra' ? { ...personaAzar(azar(77), 'mayor'), gafas: true } : tipos.peineta ? { ...personaAzar(azar(10 + i), 'adulto'), ropa: i % 2 ? '#e0566c' : '#16221b' } : conCamisetaVerde(personaAzar(azar(30 + i), 'adulto'));
+      const px = p[0] + (i - (tipos.n - 1) / 2) * 18 * s, py = p[1] + (i % 2) * 6 * s;
+      dibujaPersona(ctx, per, { x: px, y: py, esc: s, brazos: tipos.tambor ? 'arriba' : 'saluda', expr: 'feliz', t: juego.t + i, salto: Math.max(0, Math.sin(juego.t * 8 + i)) * 4 * s, luz: luzBorde });
+      if (tipos.tambor) { ctx.fillStyle = '#e0566c'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.2; rr(ctx, px - 8 * s, py - 30 * s, 16 * s, 13 * s, 3 * s); ctx.fill(); ctx.stroke(); }
+      if (tipos.peineta) { ctx.fillStyle = '#16221b'; ctx.beginPath(); ctx.arc(px, py - 60 * s, 10 * s, Math.PI, TAU); ctx.fill(); }
+    }
+    if (c.que === 'maestra') cartel(ctx, ['40 AÑOS', 'DE MAESTRA'], p[0] + 20 * s, p[1] - 58 * s, 62 * s, 30 * s, { t: juego.t });
+    if (c.que === 'batucada') cartel(ctx, ['BATUCADA'], p[0], p[1] - 84 * s, 70 * s, 18 * s, { t: juego.t, color: '#ffcf33' });
+    if (c.que === 'coro') cartel(ctx, ['CORO', 'ROCIERO'], p[0], p[1] - 84 * s, 60 * s, 26 * s, { t: juego.t, color: '#ffcf33' });
+  }
+
+  function grupoPancarta(ctx, id, x, d, despide = false) {
+    const p = proy(x, d, 0);
+    if (!p) return;
+    const s = p[2] * 0.6;
+    const R = REIVINDICACIONES[id];
+    for (let i = 0; i < 6; i++) {
+      const per = conCamisetaVerde(personaAzar(azar(id.length * 13 + i), i === 2 ? 'niño' : 'adulto'));
+      dibujaPersona(ctx, per, { x: p[0] + ((i % 3) - 1) * 20 * s, y: p[1] + Math.floor(i / 3) * 10 * s, esc: s, brazos: despide ? 'saluda' : 'puño', expr: despide ? 'normal' : 'gritando', t: juego.t + i, luz: luzBorde });
+    }
+    pancarta(ctx, R.pancarta, p[0], p[1] - 66 * s, 120 * s, 40 * s, { t: juego.t, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(id) + 1, tamMax: 40 });
+    if (!despide && !juego.reducido) {
+      const k = (Math.sin(juego.t * 5) + 1) / 2;
+      ctx.fillStyle = 'rgba(255,207,51,.95)';
+      ctx.beginPath(); ctx.moveTo(p[0] - 9, p[1] + 26 * s + 8 + k * 6); ctx.lineTo(p[0] + 9, p[1] + 26 * s + 8 + k * 6); ctx.lineTo(p[0], p[1] + 26 * s - 2 + k * 6); ctx.fill();
+    }
+  }
+
+  function dibujaPancartaCabecera(ctx, id, d, i) {
+    const p = proy(lider.x * 0.8, d, 70);
+    if (!p) return;
+    const R = REIVINDICACIONES[id];
+    const s = p[2];
+    ctx.strokeStyle = '#7d5a3c'; ctx.lineWidth = 3 * s;
+    ctx.beginPath(); ctx.moveTo(p[0] - 62 * s, p[1]); ctx.lineTo(p[0] - 62 * s, p[1] + 60 * s); ctx.moveTo(p[0] + 62 * s, p[1]); ctx.lineTo(p[0] + 62 * s, p[1] + 60 * s); ctx.stroke();
+    pancarta(ctx, R.pancarta, p[0], p[1], 130 * s, 34 * s, { t: juego.t + i, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(id) + 1, tamMax: 40, palos: false });
+  }
+
+  function dibujaMiembro(ctx, m) {
+    const p = proy(m.x, m.d, 0);
+    if (!p || p[1] > H + 90) return;
+    const s = p[2] * 0.6;
+    const frame = Math.floor(((m.paso || 0) * 4) % 4);
+    // En la ola del cántico, los brazos se levantan fila a fila.
+    const filaZ = (lider.d - m.d) / 120;
+    const enOla = ola.some(o => Math.abs(o.t * 1.6 - filaZ) < 0.25);
+    const brazos = enOla || fase === 'llegada' ? 'arriba' : m.puño ? 'puño' : 'abajo';
+    const sp = spritePersona(VARIANTES[m.var], `m${m.var}f${frame}${brazos}${tarde ? 't' : 'd'}`, { vista: 'espalda', brazos, paso: frame / 4, t: m.fase * 3, expr: 'feliz', luz: luzBorde }, ESC_SPRITE);
+    if (m.sale) ctx.globalAlpha = clamp(1 - m.sale / 2.2, 0, 1);
+    pintaSprite(ctx, sp, p[0], p[1] - (m.salto + (enOla ? 6 : 0)) * s, s / ESC_SPRITE);
+    ctx.globalAlpha = 1;
+  }
+
+  function dibujaLider(ctx) {
+    const p = proy(lider.x, lider.d, 0);
+    if (!p) return;
+    const s = p[2] * 0.66;
+    const salto = fase === 'llegada' || fase === 'ritmo' ? Math.max(0, Math.sin(juego.t * 8)) * 8 : 0;
+    ctx.strokeStyle = 'rgba(255,207,51,.95)'; ctx.lineWidth = 3;
+    elipse(ctx, p[0], p[1] + 2, 26 * s, 8 * s); ctx.stroke();
+    if (escudo) { ctx.fillStyle = 'rgba(255,207,51,.22)'; elipse(ctx, p[0], p[1] - 30 * s, 34 * s, 44 * s); ctx.fill(); icono(ctx, 'hucha', p[0] + 24 * s, p[1] - 80 * s, 20 * s); }
+    dibujaPersona(ctx, profeP, { x: p[0], y: p[1], esc: s, vista: 'espalda', brazos: 'puño', t: juego.t, paso: lider.paso, salto, luz: luzBorde });
+    // Megáfono.
+    ctx.fillStyle = '#ffcf33'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.3;
+    ctx.save(); ctx.translate(p[0] + 15 * s, p[1] - (72 + salto) * s); ctx.rotate(-0.6); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(12 * s, -6 * s); ctx.lineTo(12 * s, 6 * s); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+
+  function dibujaPerro(ctx) { const p = proy(perro.x, perro.d, 0); if (p) dibujaPerroEn(ctx, p[0], p[1], p[2] * 0.8, false); }
+  function dibujaPerroEn(ctx, x, y, s, deFrente) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    ctx.fillStyle = 'rgba(15,53,34,.2)'; elipse(ctx, 0, 2, 12, 4); ctx.fill();
     ctx.fillStyle = '#b07a48'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 1.4;
-    for (const l of [-6, 6]) { rr(ctx, l - 2, -6 + Math.sin(t * 8 + l) * 1.5, 4, 8, 2); ctx.fill(); ctx.stroke(); }
+    for (const l of [-6, 6]) { rr(ctx, l - 2, -6 + Math.sin(juego.t * 10 + l) * 1.5, 4, 8, 2); ctx.fill(); ctx.stroke(); }
     elipse(ctx, 0, -10, 11, 7); ctx.fill(); ctx.stroke();
-    circulo(ctx, deFrente ? 0 : 0, -19, 6.5); ctx.fill(); ctx.stroke();
+    circulo(ctx, 0, -19, 6.5); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#8a5a3c'; elipse(ctx, -6, -21, 2.6, 4.5, 0.4); ctx.fill(); elipse(ctx, 6, -21, 2.6, 4.5, -0.4); ctx.fill();
     ctx.fillStyle = '#5fb84a'; ctx.beginPath(); ctx.moveTo(-6, -14); ctx.lineTo(6, -14); ctx.lineTo(0, -8); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = '#b07a48'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(10, -12); ctx.quadraticCurveTo(15, -16 + Math.sin(t * 12) * 4, 14, -22); ctx.stroke();
+    ctx.strokeStyle = '#b07a48'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(10, -12); ctx.quadraticCurveTo(15, -16 + Math.sin(juego.t * 14) * 4, 14, -22); ctx.stroke();
     if (deFrente) { ctx.fillStyle = '#0f3522'; circulo(ctx, -2.2, -20, 1); ctx.fill(); circulo(ctx, 2.2, -20, 1); ctx.fill(); circulo(ctx, 0, -17, 1.4); ctx.fill(); }
     ctx.restore();
   }
 
-  function dibujaGente(ctx) {
-    // Multitud de espaldas, ordenada por profundidad. Los que acaban de unirse aún van de frente un instante.
-    const lista = [];
-    for (const m of miembros) lista.push(m);
-    lista.sort((a, b) => b.y - a.y);
-    const filasFrente = pancartasFrente.length;
-    // Pancartas que lleva la cabecera (detrás de la profe).
-    const dibujarPancartas = () => {
-      pancartasFrente.forEach((id, i) => {
-        const R = REIVINDICACIONES[id];
-        const yy = lider.y - 24 - i * 32;
-        const sy = pantallaY(yy);
-        const l = limites(yy);
-        const w = Math.min(150, l.x1 - l.x0 - 20);
-        const cx = clamp(lider.x * 0.6 + W / 2 * 0.4, l.x0 + w / 2 + 8, l.x1 - w / 2 - 8);
-        pancarta(ctx, R.pancarta, cx, sy - 58, w, 32, { t: juego.t + i, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(id) + 1 });
-      });
-    };
-    let pancartasHechas = false;
-    for (const m of lista) {
-      const sy = pantallaY(m.y);
-      if (sy < -60 || sy > H + 80) continue;
-      if (!pancartasHechas && m.y < lider.y - 24 - filasFrente * 32) { dibujarPancartas(); pancartasHechas = true; }
-      if (m.p) {
-        dibujaPersona(ctx, m.p, { x: m.x, y: sy, esc: 0.82, vista: m.entrando ? 'frente' : 'espalda', brazos: m.puño && fase !== 'marcha' ? 'puño' : m.puño ? 'puño' : 'abajo', expr: 'feliz', t: juego.t + m.fase * 5, paso: m.paso, salto: m.salto });
-      } else {
-        const frame = Math.floor(((m.paso || 0) * 4) % 4);
-        const pr = VARIANTES[m.var];
-        const s = spritePersona(pr, `m${m.var}f${frame}${m.puño ? 'p' : ''}`, { vista: 'espalda', brazos: m.puño ? 'puño' : 'abajo', paso: frame / 4, t: m.fase * 3, expr: 'feliz' }, 0.82);
-        pintaSprite(ctx, s, m.x, sy - m.salto);
-      }
+  function dibujaConsejeria(ctx) {
+    // Fachada de frente al final de la calle; sus ventanas se encienden con cada acierto.
+    const d = dConsejeria;
+    const A = proy(-FACHADA - 40, d, 0), B = proy(FACHADA + 40, d, 0), Cc = proy(FACHADA + 40, d, 230), D = proy(-FACHADA - 40, d, 230);
+    if (!A) return;
+    const s = A[2];
+    poli(ctx, [A, B, Cc, D], tarde ? '#e3b48f' : '#e9dfc9');
+    ctx.fillStyle = 'rgba(80,40,60,.18)'; ctx.fillRect(D[0], D[1], Cc[0] - D[0], 24 * s);
+    ctx.fillStyle = '#f7f8f3'; rr(ctx, (A[0] + B[0]) / 2 - 110 * s, D[1] + 4 * s, 220 * s, 16 * s, 2 * s); ctx.fill();
+    ctx.font = `700 ${11 * s}px ${fuentes.texto}`; ctx.fillStyle = '#4a594f'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('CONSEJERÍA DE EDUCACIÓN', (A[0] + B[0]) / 2, D[1] + 12.5 * s);
+    const cols = 8, filas = 3;
+    for (let f = 0; f < filas; f++) for (let c = 0; c < cols; c++) {
+      const x = -FACHADA - 10 + c * ((2 * FACHADA + 20) / (cols - 1)) - 12, h = 70 + f * 52;
+      const q = proy(x, d - 1, h + 36), w = 24 * s, hh = 36 * s;
+      if (!q) continue;
+      const i = f * cols + c;
+      const encendida = i < ventanas;
+      ctx.fillStyle = '#0f3522'; rr(ctx, q[0] - 2, q[1] - 2, w + 4, hh + 4, 2); ctx.fill();
+      ctx.fillStyle = encendida ? '#ffe28a' : '#55606e'; rr(ctx, q[0], q[1], w, hh, 2); ctx.fill();
+      const bajada = fase === 'cierre' && i === 11 ? clamp(tf / 2 - 0.3, 0, 1) : encendida ? 0.3 : 0.6;
+      ctx.fillStyle = '#cbbd9e'; ctx.fillRect(q[0], q[1], w, hh * bajada);
+      if (fase === 'cierre' && i === 11 && tf > 0.4 && tf < 1.5) { ctx.fillStyle = 'rgba(15,53,34,.6)'; circulo(ctx, q[0] + w / 2, q[1] + hh * 0.7, 6 * s); ctx.fill(); }
     }
-    if (!pancartasHechas) dibujarPancartas();
-    // La profe en cabeza, con megáfono en la mano levantada.
-    if (perro.activo) dibujaPerro(ctx, perro.x, pantallaY(perro.y), perro.paso, false);
-    const syL = pantallaY(lider.y);
-    dibujaPersona(ctx, profeP, { x: lider.x, y: syL, esc: 1.05, vista: 'espalda', brazos: 'puño', t: juego.t, paso: lider.paso, salto: fase === 'llegada' ? Math.max(0, Math.sin(tf * 8)) * 8 : 0 });
-    // Marcador de la cabecera.
-    ctx.strokeStyle = alfa('#ffcf33', 0.9); ctx.lineWidth = 2.5;
-    elipse(ctx, lider.x, syL + 2, 20, 7); ctx.stroke();
+    const pq = proy(-34, d - 1, 92);
+    if (pq) {
+      ctx.fillStyle = '#5a3c27'; rr(ctx, pq[0], pq[1], 68 * s, 92 * s, 30 * s); ctx.fill();
+      ctx.strokeStyle = '#3e2818'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(pq[0] + 34 * s, pq[1] + 10 * s); ctx.lineTo(pq[0] + 34 * s, pq[1] + 92 * s); ctx.stroke();
+      ctx.fillStyle = '#d6a93a'; circulo(ctx, pq[0] + 28 * s, pq[1] + 52 * s, 3 * s); ctx.fill(); circulo(ctx, pq[0] + 40 * s, pq[1] + 52 * s, 3 * s); ctx.fill();
+    }
   }
 
+  // ---------- Interfaz ----------
   function dibujaHUD(ctx) {
-    // Contador doble: «según la organización» y «según la Comunidad».
-    const g = ctx.createLinearGradient(0, 0, 0, 74);
-    g.addColorStop(0, 'rgba(15,53,34,.94)'); g.addColorStop(1, 'rgba(15,53,34,.82)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, 72);
+    const g = ctx.createLinearGradient(0, 0, 0, 86);
+    g.addColorStop(0, 'rgba(15,53,34,.88)'); g.addColorStop(1, 'rgba(15,53,34,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, 86);
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.font = `600 12px ${fuentes.texto}`; ctx.fillStyle = 'rgba(247,248,243,.75)';
-    ctx.fillText('Según la organización', 14, 22);
-    ctx.font = `800 30px ${fuentes.display}`; ctx.fillStyle = C.amarillo;
-    ctx.fillText(formatoNum(contador), 14, 54);
-    ctx.font = `600 12px ${fuentes.texto}`; ctx.fillStyle = 'rgba(247,248,243,.6)';
-    ctx.fillText('Según la Comunidad', 200, 22);
-    ctx.font = `800 18px ${fuentes.display}`; ctx.fillStyle = 'rgba(247,248,243,.6)';
-    ctx.fillText(formatoNum(Math.floor(contador * ACTUAL.factorComunidad.valor)), 200, 46);
-    // Barra de recorrido.
-    const prog = clamp(lider.y / (meta.desde + 200), 0, 1);
-    ctx.fillStyle = 'rgba(255,255,255,.15)'; rr(ctx, 200, 54, 130, 6, 3); ctx.fill();
-    ctx.fillStyle = C.marea; rr(ctx, 200, 54, 130 * prog, 6, 3); ctx.fill();
-    for (const t of tramos) if (t.tipo === 'glorieta' || t.tipo === 'obrasMedio') { const k = ((t.desde + t.hasta) / 2) / (meta.desde + 200); ctx.fillStyle = elegidasAqui.length > t.par ? C.amarillo : C.papel; circulo(ctx, 200 + 130 * k, 57, 4); ctx.fill(); }
+    ctx.font = `700 10.5px ${fuentes.texto}`; ctx.fillStyle = 'rgba(247,248,243,.85)';
+    ctx.fillText('SEGÚN LA ORGANIZACIÓN', 14, 20);
+    ctx.font = `800 34px ${fuentes.display}`; ctx.fillStyle = C.amarillo;
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(15,53,34,.6)'; ctx.strokeText(formatoNum(contador), 14, 54); ctx.fillText(formatoNum(contador), 14, 54);
+    ctx.font = `700 10.5px ${fuentes.texto}`; ctx.fillStyle = 'rgba(247,248,243,.6)';
+    ctx.fillText('SEGÚN LA COMUNIDAD', 200, 20);
+    ctx.font = `800 20px ${fuentes.display}`;
+    ctx.fillText(formatoNum(Math.floor(contador * ACTUAL.factorComunidad.valor)), 200, 44);
+    if (escudo) { icono(ctx, 'hucha', 290, 38, 20); ctx.font = `700 10px ${fuentes.texto}`; ctx.fillStyle = C.amarillo; ctx.fillText('caja', 302, 42); }
+    if (fase === 'marcha') {
+      const k = clamp(lider.d / dMeta, 0, 1);
+      ctx.fillStyle = 'rgba(255,255,255,.18)'; rr(ctx, 200, 54, 130, 5, 2.5); ctx.fill();
+      ctx.fillStyle = C.marea; rr(ctx, 200, 54, 130 * k, 5, 2.5); ctx.fill();
+      for (const c of cosas) if (c.tipo === 'glorieta') { ctx.fillStyle = c.hecha ? C.amarillo : C.papel; circulo(ctx, 200 + 130 * (c.d / dMeta), 56.5, 4); ctx.fill(); }
+    }
   }
 
-  function dibujaBanner(ctx) {
-    const k = aparece(banner.t, 0, 0.4) * (banner.t > 2.2 ? 1 - (banner.t - 2.2) / 0.4 : 1);
-    if (k <= 0) return;
-    const R = REIVINDICACIONES[banner.id];
-    ctx.save(); ctx.globalAlpha = clamp(k, 0, 1);
-    ctx.translate(W / 2, 112); ctx.scale(0.8 + k * 0.2, 0.8 + k * 0.2);
-    ctx.fillStyle = 'rgba(15,53,34,.9)'; rr(ctx, -160, -26, 320, 58, 14); ctx.fill();
-    icono(ctx, R.icono, -128, 3, 26, { linea: '#f7f8f3', relleno: '#f7f8f3' });
-    ctx.font = `800 17px ${fuentes.display}`; ctx.fillStyle = C.amarillo; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(`Pancarta: ${R.titulo}`, -104, -8);
-    ctx.font = `600 13px ${fuentes.texto}`; ctx.fillStyle = C.papel;
-    ctx.fillText(R.ysi, -104, 14, 256);
+  function dibujaRotulo(ctx) {
+    const o = rotuloActual;
+    const k = ease.outBack(clamp(o.t / 0.35, 0, 1));
+    const fuera = clamp((o.t - 2.2) / 0.4, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = 1 - fuera;
+    ctx.translate(W / 2, H * 0.29 - fuera * 20);
+    ctx.scale(0.6 + 0.4 * k, 0.6 + 0.4 * k);
+    ctx.rotate(-0.04);
+    ctx.font = `400 28px ${fuentes.rotulador}`;
+    const w = Math.min(W - 24, ctx.measureText(o.txt).width + 40);
+    ctx.fillStyle = 'rgba(15,53,34,.92)';
+    ctx.beginPath(); ctx.moveTo(-w / 2, -24); ctx.lineTo(w / 2 + 6, -28); ctx.lineTo(w / 2, 22); ctx.lineTo(-w / 2 - 6, 26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = o.color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.txt, 0, 0, w - 24);
+    if (o.sub) {
+      ctx.rotate(0.04);
+      ctx.font = `700 13.5px ${fuentes.texto}`;
+      const ws = Math.min(W - 30, ctx.measureText(o.sub).width + 24);
+      ctx.fillStyle = 'rgba(247,248,243,.95)'; rr(ctx, -ws / 2, 30, ws, 26, 13); ctx.fill();
+      ctx.fillStyle = C.honda; ctx.fillText(o.sub, 0, 43.5, ws - 16);
+    }
     ctx.restore();
   }
 
   function dibujaIntro(ctx) {
-    const k = aparece(tf, 0.05, 0.55);
-    ctx.fillStyle = `rgba(15,53,34,${0.45 * Math.min(1, tf * 3)})`; ctx.fillRect(0, 0, W, H);
-    const w = 330, h = 330;
-    const x = (W - w) / 2, y = H / 2 - h / 2 + (1 - k) * 60;
-    ctx.save(); ctx.globalAlpha = Math.min(1, tf * 4);
-    hoja(ctx, x, y, w, h, { rot: 0.015 });
-    rotulo(ctx, n === 1 ? 'MIÉRCOLES 14-O' : 'JUEVES 22-O', W / 2 + 8, y + 48, { tam: 30 });
-    ctx.font = `600 15px ${fuentes.texto}`; ctx.fillStyle = C.gris; ctx.textAlign = 'center';
-    ctx.fillText(n === 1 ? 'Primer día de huelga indefinida' : 'Manifestación hasta la Consejería', W / 2 + 10, y + 84);
-    let yy = y + 108;
-    yy += parrafo(ctx, 'Arrastra a izquierda y derecha para guiar la mani. Pasa cerca de la gente y se sumará.', x + 44, yy, w - 64, { tam: 15 }) + 10;
-    parrafo(ctx, n === 1 ? 'En cada glorieta te esperan dos pancartas. Solo puedes llevar una: elige por qué lado pasas.' : 'Al final, la Consejería. A ver si nos abren.', x + 44, yy, w - 64, { tam: 15, peso: 700, color: C.pizarra });
-    if (tf > 1.1) {
-      ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.pizarra; ctx.textAlign = 'center';
-      ctx.globalAlpha = 0.6 + Math.sin(juego.t * 5) * 0.4;
-      ctx.fillText('Toca para salir a la calle', W / 2 + 8, y + h - 28);
-    }
+    // Mano fantasma que enseña a arrastrar.
+    const k = (juego.t % 1.6) / 1.6;
+    const x = W / 2 + Math.sin(k * TAU) * 80, y = H * 0.8;
+    ctx.save();
+    ctx.fillStyle = 'rgba(15,53,34,.85)'; rr(ctx, W / 2 - 160, H - 100, 320, 52, 18); ctx.fill();
+    ctx.font = `700 14px ${fuentes.texto}`; ctx.fillStyle = C.papel; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('Arrastra para guiar la mani: suma gente', W / 2, H - 83);
+    ctx.fillText('y elige pancarta en cada glorieta. ¡Toca!', W / 2, H - 64);
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.strokeStyle = '#0f3522'; ctx.lineWidth = 2; circulo(ctx, x, y, 15); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  function sello(ctx, txt, sub, x, y, k) {
+    if (k <= 0) return;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(-0.06); ctx.scale(2 - k, 2 - k); ctx.globalAlpha = clamp(k * 1.4, 0, 1);
+    ctx.font = `800 32px ${fuentes.display}`;
+    const w = Math.max(240, ctx.measureText(txt).width + 50);
+    ctx.fillStyle = 'rgba(15,53,34,.88)'; rr(ctx, -w / 2, -44, w, 88, 10); ctx.fill();
+    ctx.strokeStyle = C.amarillo; ctx.lineWidth = 4; rr(ctx, -w / 2 - 4, -48, w + 8, 96, 12); ctx.stroke();
+    ctx.fillStyle = C.amarillo; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(txt, 0, -10);
+    ctx.font = `600 13px ${fuentes.texto}`; ctx.fillStyle = C.papel; ctx.fillText(sub, 0, 23);
     ctx.restore();
   }
 
   function dibujaFinMani1(ctx) {
-    const t = tf - 1.2;
-    const k = aparece(t, 0, 0.5);
-    ctx.fillStyle = `rgba(15,53,34,${0.45 * Math.min(1, t * 3)})`; ctx.fillRect(0, 0, W, H);
-    const w = 340, h = 340;
-    const x = (W - w) / 2, y = H / 2 - h / 2 + (1 - k) * 50;
-    hoja(ctx, x, y, w, h, { rot: -0.012 });
-    rotulo(ctx, '¡PRIMER DÍA!', W / 2 + 8, y + 44, { tam: 30 });
-    ctx.font = `800 26px ${fuentes.display}`; ctx.fillStyle = C.honda; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(`${formatoNum(personasReales())} personas`, W / 2 + 10, y + 88);
-    ctx.font = `600 13px ${fuentes.texto}`; ctx.fillStyle = C.gris;
-    ctx.fillText(`(${formatoNum(Math.floor(personasReales() * ACTUAL.factorComunidad.valor))} según la Comunidad)`, W / 2 + 10, y + 112);
-    let yy = y + 134;
-    ctx.font = `700 14px ${fuentes.texto}`; ctx.fillStyle = C.tinta; ctx.textAlign = 'left';
-    ctx.fillText('Te llevas estas pancartas:', x + 44, yy); yy += 14;
+    const t = tf - 1;
+    sello(ctx, `${formatoNum(total())} personas`, `${formatoNum(Math.floor(total() * ACTUAL.factorComunidad.valor))} según la Comunidad`, W / 2, H * 0.3, ease.outBack(clamp(t / 0.4, 0, 1)));
     elegidasAqui.forEach((id, i) => {
       const R = REIVINDICACIONES[id];
-      pancarta(ctx, R.pancarta, W / 2 + 10, yy + 8 + i * 52, 220, 40, { t: juego.t + i, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(id) + 1, palos: false });
+      const kk = ease.outBack(clamp((t - 0.4 - i * 0.25) / 0.4, 0, 1));
+      if (kk <= 0) return;
+      ctx.save(); ctx.translate(W / 2, H * 0.46 + i * 54); ctx.scale(kk, kk);
+      pancarta(ctx, R.pancarta, 0, 0, 230, 42, { t: juego.t + i, color: R.color === '#f3efe6' ? '#ffffff' : R.color, icono: R.icono, semilla: IDS.indexOf(id) + 1, palos: false, tamMax: 32 });
+      ctx.restore();
     });
-    yy += elegidasAqui.length * 52 + 22;
-    parrafo(ctx, 'Mañana, en clase: ¿y si se consiguieran?', x + 44, yy, w - 64, { tam: 15, peso: 700, color: C.pizarra });
-    if (t > 1) {
-      ctx.globalAlpha = 0.6 + Math.sin(juego.t * 5) * 0.4;
-      ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.pizarra; ctx.textAlign = 'center';
-      ctx.fillText('Toca para seguir', W / 2 + 8, y + h - 24);
+    if (t > 1.6) {
+      const y = H * 0.46 + elegidasAqui.length * 54 + 18;
+      ctx.globalAlpha = 0.65 + Math.sin(juego.t * 5) * 0.35;
+      ctx.font = `800 17px ${fuentes.display}`; ctx.fillStyle = C.papel; ctx.textAlign = 'center';
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(15,53,34,.8)';
+      ctx.strokeText('Toca: mañana, en clase… ¿y si se consiguieran?', W / 2, y, W - 24);
+      ctx.fillText('Toca: mañana, en clase… ¿y si se consiguieran?', W / 2, y, W - 24);
       ctx.globalAlpha = 1;
     }
   }
 
   function dibujaRitmo(ctx) {
     const ahora = juego.audio.tiempo();
-    // Letra del cántico en la parte de abajo.
-    ctx.fillStyle = 'rgba(15,53,34,.88)'; ctx.fillRect(0, H - 190, W, 190);
+    ctx.fillStyle = 'rgba(15,53,34,.82)'; ctx.fillRect(0, H - 180, W, 180);
     const frase = Math.floor(clamp((ahora - ritmo.inicio) / ritmo.frase, 0, 3.999));
-    const notasFrase = ritmo.notas.filter(no => no.frase === frase);
-    // Sílabas centradas.
-    ctx.textBaseline = 'middle';
-    let total = 0;
-    const tam = 22;
-    ctx.font = `400 ${tam}px ${fuentes.rotulador}`;
-    const anchos = notasFrase.map(no => ctx.measureText(no.texto.toUpperCase()).width + 8);
-    total = anchos.reduce((a, b) => a + b, 0);
-    let x = W / 2 - total / 2;
-    notasFrase.forEach((no, i) => {
+    const nf = ritmo.notas.filter(x => x.frase === frase);
+    let tamL = 23;
+    ctx.font = `400 ${tamL}px ${fuentes.rotulador}`; ctx.textBaseline = 'middle';
+    let anchos = nf.map(x => ctx.measureText(x.texto.toUpperCase()).width + 7);
+    const totalL = anchos.reduce((a, b) => a + b, 0);
+    if (totalL > W - 28) { tamL *= (W - 28) / totalL; ctx.font = `400 ${tamL}px ${fuentes.rotulador}`; anchos = nf.map(x => ctx.measureText(x.texto.toUpperCase()).width + 7 * tamL / 23); }
+    let x = W / 2 - anchos.reduce((a, b) => a + b, 0) / 2;
+    nf.forEach((no, i) => {
       const activo = ahora >= no.t - 0.02;
-      ctx.fillStyle = no.fuerte ? (no.estado === 'fallo' ? '#e0566c' : activo ? C.amarillo : '#f7f8f3') : activo ? '#86cd55' : 'rgba(247,248,243,.55)';
+      ctx.fillStyle = no.fuerte ? (no.estado === 'fallo' ? '#ff8a8a' : activo ? C.amarillo : C.papel) : activo ? C.marea : 'rgba(247,248,243,.5)';
       ctx.textAlign = 'left';
-      const sy = H - 150 - (activo && ahora - no.t < 0.15 ? 4 : 0);
-      ctx.fillText(no.texto.toUpperCase(), x, sy);
+      ctx.fillText(no.texto.toUpperCase(), x, H - 146 - (activo && ahora - no.t < 0.15 ? 5 : 0));
       x += anchos[i];
     });
-    // Diana: los círculos se cierran hacia el anillo al ritmo de las sílabas fuertes.
-    const cx = W / 2, cy = H - 82;
-    ctx.strokeStyle = 'rgba(247,248,243,.9)'; ctx.lineWidth = 4; circulo(ctx, cx, cy, 30); ctx.stroke();
+    const cx = W / 2, cy = H - 76;
     const golpe = clamp(1 - (juego.t - ritmo.ultimoGolpe) / 0.25, 0, 1);
-    ctx.fillStyle = alfa('#ffcf33', 0.25 + golpe * 0.6); circulo(ctx, cx, cy, 30 + golpe * 6); ctx.fill();
+    ctx.fillStyle = alfa('#ffcf33', 0.2 + golpe * 0.6); circulo(ctx, cx, cy, 30 + golpe * 8); ctx.fill();
+    ctx.strokeStyle = C.papel; ctx.lineWidth = 4; circulo(ctx, cx, cy, 30); ctx.stroke();
     for (const no of ritmo.notas) {
       if (!no.fuerte || no.estado !== 'espera') continue;
       const dt = no.t - ahora;
       if (dt > 1.2 || dt < -0.2) continue;
-      const rr2 = 30 + Math.max(0, dt) * 110;
       ctx.strokeStyle = alfa('#ffcf33', clamp(1 - dt / 1.2, 0, 1)); ctx.lineWidth = 5;
-      circulo(ctx, cx, cy, rr2); ctx.stroke();
+      circulo(ctx, cx, cy, 30 + Math.max(0, dt) * 110); ctx.stroke();
     }
-    ctx.font = `800 14px ${fuentes.display}`; ctx.fillStyle = C.papel; ctx.textAlign = 'center';
-    ctx.fillText('Toca cuando el círculo llegue al anillo', cx, H - 30);
-    ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.amarillo;
-    ctx.fillText(`${ritmo.aciertos} / ${ritmo.total}`, cx, cy + 1);
-    if (ahora < ritmo.inicio) {
-      const cuenta = Math.ceil(ritmo.inicio - ahora);
-      rotulo(ctx, cuenta > 1 ? '¡TODAS Y TODOS!' : '¡YA!', W / 2, H / 2 - 40, { tam: 30, color: C.papel, sombra: C.honda });
-    }
+    ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.amarillo; ctx.textAlign = 'center';
+    ctx.fillText(`${ritmo.aciertos}/${ritmo.total}`, cx, cy + 1);
+    ctx.font = `700 13px ${fuentes.texto}`; ctx.fillStyle = C.papel;
+    ctx.fillText('Toca cuando el círculo llegue al anillo', cx, H - 24);
+    if (ahora < ritmo.inicio) rotulo(ctx, '¡TODAS Y TODOS!', W / 2, H * 0.36, { tam: 32, color: C.papel, sombra: C.honda });
+    if (ritmo.racha >= 4) { ctx.font = `400 22px ${fuentes.rotulador}`; ctx.fillStyle = C.amarillo; ctx.fillText(`¡RACHA x${ritmo.racha}!`, cx, H - 198); }
   }
 
   function dibujaCierre(ctx) {
-    if (tf < 2.2) return;
-    const t = tf - 2.2;
-    const k = aparece(t, 0, 0.5);
-    ctx.fillStyle = `rgba(15,53,34,${0.5 * Math.min(1, t * 3)})`; ctx.fillRect(0, 0, W, H);
-    const w = 340, h = 330;
-    const x = (W - w) / 2, y = H / 2 - h / 2 + (1 - k) * 50;
-    hoja(ctx, x, y, w, h, { rot: 0.012 });
-    rotulo(ctx, 'LA PUERTA, CERRADA', W / 2 + 8, y + 44, { tam: 25 });
-    ctx.font = `800 24px ${fuentes.display}`; ctx.fillStyle = C.honda; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(`${formatoNum(personasReales())} personas`, W / 2 + 10, y + 86);
-    ctx.font = `600 13px ${fuentes.texto}`; ctx.fillStyle = C.gris;
-    ctx.fillText(`Cántico: ${ritmo.aciertos} de ${ritmo.total} a tiempo`, W / 2 + 10, y + 110);
-    let yy = y + 134;
-    yy += parrafo(ctx, 'La consejera llama «inasumible» a lo que pedís y el comité de huelga denuncia que no se reúne con él.', x + 44, yy, w - 64, { tam: 15 }) + 12;
-    parrafo(ctx, 'Por eso la huelga sigue. Mientras tanto, imagina la clase con todo lo que has llevado en la mani.', x + 44, yy, w - 64, { tam: 15, peso: 700, color: C.pizarra });
-    if (t > 1.6) {
-      ctx.globalAlpha = 0.6 + Math.sin(juego.t * 5) * 0.4;
-      ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.pizarra; ctx.textAlign = 'center';
-      ctx.fillText('Toca para seguir', W / 2 + 8, y + h - 24);
+    if (tf < 1.6) return;
+    const t = tf - 1.6;
+    sello(ctx, 'PUERTA CERRADA', `${formatoNum(total())} personas · cántico ${ritmo.aciertos}/${ritmo.total}`, W / 2, H * 0.3, ease.outBack(clamp(t / 0.4, 0, 1)));
+    if (t > 0.8) {
+      ctx.save(); ctx.globalAlpha = clamp((t - 0.8) / 0.5, 0, 1);
+      ctx.fillStyle = 'rgba(247,248,243,.95)'; rr(ctx, 24, H * 0.42, W - 48, 92, 14); ctx.fill();
+      ctx.font = `700 15px ${fuentes.texto}`; ctx.fillStyle = C.honda; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('La consejera llama «inasumible»', W / 2, H * 0.42 + 24);
+      ctx.fillText('a lo que pedís, y el comité denuncia', W / 2, H * 0.42 + 45);
+      ctx.fillText('que no se reúne con él.', W / 2, H * 0.42 + 66);
+      ctx.restore();
+    }
+    if (t > 2.6) {
+      ctx.globalAlpha = 0.65 + Math.sin(juego.t * 5) * 0.35;
+      ctx.font = `800 16px ${fuentes.display}`; ctx.fillStyle = C.papel; ctx.textAlign = 'center';
+      ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(15,53,34,.8)';
+      ctx.strokeText('Toca: imagina la clase con lo que has llevado', W / 2, H * 0.42 + 122, W - 24);
+      ctx.fillText('Toca: imagina la clase con lo que has llevado', W / 2, H * 0.42 + 122, W - 24);
       ctx.globalAlpha = 1;
     }
   }

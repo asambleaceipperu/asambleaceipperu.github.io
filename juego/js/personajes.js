@@ -34,9 +34,9 @@ export function personaAzar(r, edad = 'adulto', extra = {}) {
 
 // Medidas base (unidades locales; los pies en 0,0, hacia arriba es negativo).
 function medidas(p) {
-  if (p.edad === 'niño') return { hr: 11.5, cy: -35, bw: 20, bTop: -24, bBot: -6, piernas: 6, brazo: 11 };
-  if (p.edad === 'mayor') return { hr: 11.5, cy: -50, bw: 24, bTop: -38, bBot: -10, piernas: 10, brazo: 14 };
-  return { hr: 11.5, cy: -52, bw: 23, bTop: -40, bBot: -10, piernas: 10, brazo: 15 };
+  if (p.edad === 'niño') return { hr: 12.8, cy: -36, bw: 20, bTop: -24, bBot: -6, piernas: 6, brazo: 11 };
+  if (p.edad === 'mayor') return { hr: 12.2, cy: -51, bw: 24, bTop: -38, bBot: -10, piernas: 10, brazo: 14 };
+  return { hr: 12.2, cy: -53, bw: 23, bTop: -40, bBot: -10, piernas: 10, brazo: 15 };
 }
 
 /**
@@ -45,7 +45,7 @@ function medidas(p) {
  *      expr: 'normal'|'feliz'|'triste'|'dormido'|'sorpresa'|'cansado'|'gritando', t, paso, salto, sentado, mira (-1..1), parpadeo }
  */
 export function dibujaPersona(ctx, p, o = {}) {
-  const { x = 0, y = 0, esc = 1, vista = 'frente', brazos = 'abajo', expr = 'normal', t = 0, paso = 0, salto = 0, sentado = false, mira = 0, sinSombra = false, lw = 1.7 } = o;
+  const { x = 0, y = 0, esc = 1, vista = 'frente', brazos = 'abajo', expr = 'normal', t = 0, paso = 0, salto = 0, sentado = false, mira = 0, sinSombra = false, lw = 1.7, luz = null } = o;
   const m = medidas(p);
   ctx.save();
   ctx.translate(x, y);
@@ -154,6 +154,7 @@ export function dibujaPersona(ctx, p, o = {}) {
   ctx.clip();
   ctx.fillStyle = 'rgba(15,40,25,.13)';
   ctx.fillRect(bw * 0.12, m.bTop, bw, bh);
+  if (luz) { const lg = ctx.createLinearGradient(-bw / 2, 0, -bw / 2 + 7, 0); lg.addColorStop(0, luz); lg.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = lg; ctx.fillRect(-bw / 2 - 2, m.bTop, 10, bh); }
   ctx.fillStyle = 'rgba(255,255,255,.14)';
   ctx.fillRect(-bw / 2, m.bTop, bw * 0.22, bh);
   if (p.estampado === 'raya') { ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-bw / 2, m.bTop + bh * 0.42, bw, 3); }
@@ -171,7 +172,7 @@ export function dibujaPersona(ctx, p, o = {}) {
   }
 
   // Cabeza.
-  dibujaCabeza(ctx, p, 0, cy, hr, { espalda, expr, t, mira, lw, parpadeo: o.parpadeo });
+  dibujaCabeza(ctx, p, 0, cy, hr, { espalda, expr, t, mira, lw, parpadeo: o.parpadeo, luz });
 
   brazosDelante.forEach(dibujaBrazo);
   ctx.restore();
@@ -192,7 +193,7 @@ function frijol(ctx, bw, top, bh) {
   ctx.closePath();
 }
 
-export function dibujaCabeza(ctx, p, x, cy, hr, { espalda = false, expr = 'normal', t = 0, mira = 0, lw = 1.7, parpadeo } = {}) {
+export function dibujaCabeza(ctx, p, x, cy, hr, { espalda = false, expr = 'normal', t = 0, mira = 0, lw = 1.7, parpadeo, luz = null } = {}) {
   ctx.lineWidth = lw;
   ctx.strokeStyle = LINEA;
   const piel = p.piel;
@@ -218,6 +219,7 @@ export function dibujaCabeza(ctx, p, x, cy, hr, { espalda = false, expr = 'norma
   circulo(ctx, x, cy, hr); ctx.clip();
   ctx.fillStyle = 'rgba(120,50,20,.10)';
   circulo(ctx, x + hr * 0.45, cy + hr * 0.25, hr); ctx.fill();
+  if (luz) { ctx.strokeStyle = luz; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, cy, hr - 1.2, Math.PI * 0.75, Math.PI * 1.3); ctx.stroke(); }
   ctx.restore();
   // Pelo (tapa superior).
   ctx.fillStyle = pelo;
@@ -257,7 +259,7 @@ export function dibujaCabeza(ctx, p, x, cy, hr, { espalda = false, expr = 'norma
       ctx.stroke();
     }
   } else {
-    for (const l of [-1, 1]) { elipse(ctx, x + l * sep + mx, ojoY, 1.6, expr === 'sorpresa' ? 2.4 : 2.1); ctx.fill(); }
+    for (const l of [-1, 1]) { elipse(ctx, x + l * sep + mx, ojoY, 1.8, expr === 'sorpresa' ? 2.7 : 2.35); ctx.fill(); }
     // Brillo en los ojos.
     ctx.fillStyle = 'rgba(255,255,255,.85)';
     for (const l of [-1, 1]) { circulo(ctx, x + l * sep + mx + 0.5, ojoY - 0.8, 0.55); ctx.fill(); }

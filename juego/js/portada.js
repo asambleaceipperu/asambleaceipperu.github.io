@@ -20,7 +20,7 @@ export function escenaPortada(juego) {
     fondo: '#0f3522',
     redimensionar() { H = juego.H; },
     info: () => ({ fase: 'portada', tf, boton: botonEmpezar }),
-    entrar() { juego.audio.musica('final'); },
+    entrar() { juego.audio.musica('final'); juego.audio.multitud(0); },
     actualizar(dt) {
       tf += dt;
       saltos = saltos.map(s => Math.max(0, s - dt));
@@ -74,6 +74,18 @@ export function escenaPortada(juego) {
       ctx.font = `500 14px ${fuentes.texto}`; ctx.fillStyle = 'rgba(247,248,243,.8)';
       ctx.fillText('Da clase, sal a la calle y descubre qué pedimos.', W / 2, ty + 202);
       ctx.restore();
+      // Si vienes por un reto, la marca a batir.
+      if (juego.reto && tf > 0.8) {
+        const k = Math.min(1, (tf - 0.8) * 3);
+        const R = juego.reto;
+        ctx.save(); ctx.translate(W / 2, ty + 224); ctx.rotate(-0.03 + Math.sin(juego.t * 2) * 0.01); ctx.scale(k, k);
+        ctx.fillStyle = C.amarillo; rr(ctx, -165, -26, 330, 52, 12); ctx.fill();
+        ctx.font = `800 15px ${fuentes.display}`; ctx.fillStyle = C.honda; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`Te retan: ${R.llegados} de ${R.total} en clase`, 0, -9);
+        ctx.font = `600 13px ${fuentes.texto}`;
+        ctx.fillText(`y ${R.personas.toLocaleString('es-ES')} personas en la mani. ¿Lo superas?`, 0, 11);
+        ctx.restore();
+      }
 
       // Elige a tu profe.
       const sitios = sitiosProfe();

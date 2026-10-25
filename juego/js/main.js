@@ -7,6 +7,7 @@ import { escenaAula } from './aula.js';
 import { escenaSala } from './sala.js';
 import { escenaMani } from './mani.js';
 import { escenaFinal } from './final.js';
+import { leerReto } from './tarjeta.js';
 
 const lienzo = document.getElementById('lienzo');
 const ctx = lienzo.getContext('2d');
@@ -19,6 +20,9 @@ export const juego = {
   estado: estadoInicial(),
   reducido: matchMedia('(prefers-reduced-motion: reduce)').matches,
   debug: DEBUG,
+  calidad: new URLSearchParams(location.search).has('baja') ? 0 : 1,
+  // Marca de quien te ha retado (?reto=llegados-total-personas).
+  reto: leerReto(params.get('reto')),
   audio,
 };
 
@@ -132,6 +136,9 @@ function fotograma(ahora) {
   ultimo = ahora;
   juego.dt = dt;
   juego.t += dt;
+  // Calidad adaptativa: si el móvil no llega a ~45 fps durante unos segundos, se simplifica el dibujo.
+  juego.dtMedio = (juego.dtMedio || dt) * 0.97 + dt * 0.03;
+  if (juego.calidad && !transicion) { juego.lento = juego.dtMedio > 1 / 45 ? (juego.lento || 0) + dt : 0; if (juego.lento > 3) juego.calidad = 0; }
 
   if (transicion) {
     transicion.t += dt;
@@ -143,6 +150,7 @@ function fotograma(ahora) {
   }
   // Durante la salida no se procesa la entrada de la escena anterior.
   if (transicion?.fase === 'sale') juego.entrada.vaciar();
+  const tIni = performance.now();
   escena.actualizar(dt);
   juego.entrada.toques.length = 0;
   juego.entrada.pulsaciones.length = 0;
@@ -153,10 +161,11 @@ function fotograma(ahora) {
   ctx.setTransform(esc * dpr, 0, 0, esc * dpr, 0, offY * esc * dpr);
   escena.dibujar(ctx);
   dibujaTransicion();
+  if (DEBUG) { const ms = performance.now() - tIni; juego.msMedio = (juego.msMedio || ms) * 0.95 + ms * 0.05; }
   if (DEBUG) {
-    ctx.fillStyle = alfa('#000000', 0.5); ctx.fillRect(0, juego.H - 18, 120, 18);
+    ctx.fillStyle = alfa('#000000', 0.5); ctx.fillRect(0, juego.H - 18, 170, 18);
     ctx.fillStyle = '#fff'; ctx.font = '11px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(`${Math.round(1 / Math.max(dt, 0.001))} fps · ${FLUJO[paso][0]}`, 4, juego.H - 9);
+    ctx.fillText(`${Math.round(1 / Math.max(dt, 0.001))} fps · ${(juego.msMedio || 0).toFixed(1)} ms · ${FLUJO[paso][0]}`, 4, juego.H - 9);
   }
 }
 

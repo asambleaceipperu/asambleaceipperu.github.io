@@ -45,12 +45,16 @@ export function escenaFinal(juego) {
       <p class="enlaces-queja">Para la queja: <a href="https://www.confapamadrid.org/2026/10/informacion-huelga-indefinida-docentes.html">modelo de CONFAPA</a><a href="https://sede.comunidad.madrid/prestacion-social/formulario-solicitud-generica">sede electrónica</a></p>
       <div class="tarjeta-zona">
         <h2 style="font-size:24px;margin-top:10px">Tu tarjeta</h2>
-        <img id="tarjeta-img" alt="Tarjeta de resultado: ${a0 ? `el lunes llegué a ${a0.llegados} de ${a0.total}` : ''}${a2 ? `; en la clase que pedimos, a ${a2.llegados} de ${a2.total}` : ''}." width="1080" height="1350">
+        <label class="cole" for="cole">¿De qué cole eres? <small>(opcional, sale en tu tarjeta)</small>
+          <input id="cole" name="cole" type="text" maxlength="40" autocomplete="off" placeholder="CEIP Perú">
+        </label>
+        <img id="tarjeta-img" alt="Tarjeta de resultado: ${a0 ? `el lunes llegué a ${a0.llegados} de ${a0.total}` : ''}${a2 ? `; en la clase que pedimos, a ${a2.llegados} de ${a2.total}` : ''}." width="1080" height="1920">
         <div class="botones">
           <button class="boton" id="b-compartir" type="button">Compartir</button>
           <a class="boton" id="b-whatsapp" href="#" target="_blank" rel="noopener">WhatsApp</a>
           <a class="boton secundario" id="b-guardar" href="#" download="llegar-a-todos.png">Guardar imagen</a>
         </div>
+        <p class="nota-final">Quien abra tu enlace verá tu marca y podrá intentar superarla.</p>
       </div>
       <div class="botones" style="margin-top:6px">
         <button class="boton secundario" id="b-otra" type="button">Volver a jugar</button>
@@ -71,20 +75,31 @@ export function escenaFinal(juego) {
     const texto = textoCompartir(est);
     capa.querySelector('#b-whatsapp').href = `https://wa.me/?text=${encodeURIComponent(texto)}`;
     capa.querySelector('#b-otra').addEventListener('click', () => { capa.hidden = true; capa.innerHTML = ''; juego.reiniciar(); });
-    generarTarjeta(est).then(({ blob, url }) => {
+    // La tarjeta se regenera si escribes tu cole.
+    const entrada = capa.querySelector('#cole');
+    try { entrada.value = localStorage.getItem('llegar-cole') || ''; } catch { /* sin almacenamiento */ }
+    let archivo = null, urlAnterior = null, espera = null;
+    const pintar = () => generarTarjeta(est, { cole: entrada.value.trim(), reto: juego.reto }).then(({ blob, url }) => {
       const img = capa.querySelector('#tarjeta-img');
       if (!img) return;
+      if (urlAnterior) URL.revokeObjectURL(urlAnterior);
+      urlAnterior = url;
       img.src = url;
       capa.querySelector('#b-guardar').href = url;
-      const archivo = new File([blob], 'llegar-a-todos.png', { type: 'image/png' });
-      const b = capa.querySelector('#b-compartir');
-      b.addEventListener('click', async () => {
-        try {
-          if (navigator.canShare && navigator.canShare({ files: [archivo] })) await navigator.share({ files: [archivo], text: texto });
-          else if (navigator.share) await navigator.share({ text: texto });
-          else { await navigator.clipboard.writeText(texto); b.textContent = 'Texto copiado'; }
-        } catch { /* compartir cancelado */ }
-      });
+      archivo = new File([blob], 'llegar-a-todos.png', { type: 'image/png' });
+    });
+    entrada.addEventListener('input', () => {
+      try { localStorage.setItem('llegar-cole', entrada.value.trim()); } catch { /* sin almacenamiento */ }
+      clearTimeout(espera); espera = setTimeout(pintar, 400);
+    });
+    pintar();
+    const b = capa.querySelector('#b-compartir');
+    b.addEventListener('click', async () => {
+      try {
+        if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] })) await navigator.share({ files: [archivo], text: texto });
+        else if (navigator.share) await navigator.share({ text: texto });
+        else { await navigator.clipboard.writeText(texto); b.textContent = 'Texto copiado'; }
+      } catch { /* compartir cancelado */ }
     });
   }
 
@@ -92,7 +107,7 @@ export function escenaFinal(juego) {
     fondo: '#0f3522',
     redimensionar() { H = juego.H; },
     info: () => ({ fase, tf }),
-    entrar() { juego.audio.musica('final', { reiniciar: true }); },
+    entrar() { juego.audio.musica('final', { reiniciar: true }); juego.audio.multitud(0); },
     salir() { capa.hidden = true; capa.innerHTML = ''; },
     actualizar(dt) {
       tf += dt;

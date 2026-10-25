@@ -19,6 +19,10 @@ export function escenaSala(juego, { n = 1 }) {
 
   let linea = 0, tLinea = 0, tf = 0;
   let botonSeguir = null;
+  const botonSaltar = { x: juego.W - 96, y: 64, w: 84, h: 30 };
+  // Cada personaje balbucea con su propio tono.
+  const TONOS = { 0: 0.8, 1: 1.25, 2: 1.1, p: 1 };
+  function hablar() { const [q, txt] = guion[linea]; juego.audio.voz(TONOS[q] || 1, Math.min(14, Math.ceil(txt.length / 6))); }
   let aviso = null; // bocadillo de un objeto tocado
   const L = {};
   function disponer() {
@@ -70,19 +74,19 @@ export function escenaSala(juego, { n = 1 }) {
     fondo: '#efe8d6',
     redimensionar: disponer,
     info: () => ({ fase: botonSeguir ? 'boton' : 'dialogo', tf }),
-    entrar() { juego.audio.musica('sala'); },
+    entrar() { juego.audio.musica('sala'); juego.audio.multitud(0); hablar(); },
     actualizar(dt) {
       tf += dt; tLinea += dt;
       part.actualizar(dt);
       if (aviso) { aviso.t += dt; if (aviso.t > 2.6) aviso = null; }
       for (const t of juego.entrada.toques) {
-        if (botonSeguir && dentro(t, botonSeguir)) { juego.audio.sfx('toque'); juego.siguiente(); return; }
+        if ((botonSeguir && dentro(t, botonSeguir)) || dentro(t, botonSaltar)) { juego.audio.sfx('toque'); juego.siguiente(); return; }
         if (tocarObjeto(t)) continue;
         if (tf < 0.6) continue;
         // Avanzar el diálogo: primero completa la línea, luego pasa a la siguiente.
         const lleno = tLinea * 45 >= guion[linea][1].length;
         if (!lleno) tLinea = 99;
-        else if (linea < guion.length - 1) { linea++; tLinea = 0; juego.audio.sfx('toque'); }
+        else if (linea < guion.length - 1) { linea++; tLinea = 0; hablar(); }
       }
     },
     dibujar(ctx) {
@@ -97,6 +101,10 @@ export function escenaSala(juego, { n = 1 }) {
       ctx.fillStyle = 'rgba(15,53,34,.9)'; ctx.fillRect(0, 0, W, 54);
       ctx.font = `400 18px ${fuentes.rotulador}`; ctx.fillStyle = C.amarillo; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.fillText(n === 1 ? 'Sala de profes · lunes, 16:00' : 'Sala de profes · otro día', 14, 28);
+      // Saltar la escena.
+      ctx.fillStyle = 'rgba(15,53,34,.85)'; rr(ctx, botonSaltar.x, botonSaltar.y, botonSaltar.w, botonSaltar.h, 15); ctx.fill();
+      ctx.font = `800 13px ${fuentes.display}`; ctx.fillStyle = C.papel; ctx.textAlign = 'center';
+      ctx.fillText('Saltar ›', botonSaltar.x + botonSaltar.w / 2, botonSaltar.y + botonSaltar.h / 2 + 1);
 
     },
   };

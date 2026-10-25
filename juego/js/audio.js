@@ -12,7 +12,7 @@ export function frecuencia(n) {
 }
 const transponer = (n, semitonos) => frecuencia(n) * 2 ** (semitonos / 12);
 
-let ac = null, master, busMusica, busSfx, ruido, pulso25, salida;
+let ac = null, master, busMusica, busSfx, ruido, pulso25, salida, rumor = null;
 let grabacion = null; // AudioBuffer del cántico grabado, si existe
 const leerMudo = () => { try { return localStorage.getItem('llegar-mudo') === '1'; } catch { return false; } };
 
@@ -57,6 +57,32 @@ export const audio = {
     secuenciador.poner(nombre, opc);
   },
   capa(nombre, activa) { secuenciador.capas[nombre] = activa; },
+  // Voz «balbuceo»: sílabas cortas con el tono propio de cada personaje.
+  voz(tono = 1, silabas = 6) {
+    if (!ac) return;
+    const t0 = ac.currentTime + 0.01;
+    for (let i = 0; i < silabas; i++) {
+      const t = t0 + i * 0.075;
+      const f = 300 * tono * 2 ** ((Math.random() * 6 - 2) / 12);
+      tono_(t, f, 0.05, { tipo: 'triangle', vol: 0.07, a: 0.004, d: 0.03, s: 0.5, r: 0.03, bus: busSfx });
+      tono_(t, f * 2.01, 0.04, { tipo: 'pulso', vol: 0.025, s: 0.3, r: 0.02, bus: busSfx });
+    }
+  },
+  // Rumor de multitud (0 a 1). Se usa en la mani; las palmas siguen el tamaño.
+  multitud(nivel) {
+    if (!ac) return;
+    if (!rumor) {
+      const s = ac.createBufferSource(); s.buffer = ruido; s.loop = true;
+      const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.6;
+      const g = ac.createGain(); g.gain.value = 0;
+      const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 0.35; lg.gain.value = 0.25;
+      lfo.connect(lg).connect(g.gain); lfo.start();
+      s.connect(f).connect(g).connect(busSfx); s.start();
+      rumor = { g };
+    }
+    secuenciador.capas.palmas = nivel;
+    rumor.g.gain.setTargetAtTime(nivel * 0.35, ac.currentTime, 0.4);
+  },
   tempo(bpm) { secuenciador.bpm = bpm; },
   pararMusica(fundido = 0.6) { secuenciador.parar(fundido); },
   // Solo para pruebas: graba la salida durante `ms` milisegundos y devuelve los datos en base64.
@@ -90,6 +116,7 @@ function env(g, t, a, d, s, r, dur, pico = 1) {
   g.gain.setValueAtTime(pico * s, t + Math.max(a + d, dur));
   g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(a + d, dur) + r);
 }
+function tono_(t, f, dur, o) { return tono(t, f, dur, o); }
 function tono(t, f, dur, { tipo = 'square', vol = 0.2, a = 0.004, d = 0.06, s = 0.5, r = 0.08, bus = busMusica, desliz = 0, vibrato = 0 } = {}) {
   const o = ac.createOscillator();
   if (tipo === 'pulso') o.setPeriodicWave(pulso25); else o.type = tipo;
@@ -181,6 +208,7 @@ const PIEZAS = {
       hat(t, n % 2 ? 0.05 : 0.09);
       if (capas.batucada) { if ([0, 3, 6].includes(n)) caja(t, 0.18); if (n === 7) bombo(t, 0.4, 150); agogo(t, n === 2 || n === 3, n === 2 || n === 3 || n === 6 ? 0.12 : 0); }
       if (capas.coro && n % 2 === 0) castanuela(t, 0.18);
+      if (capas.palmas > 0.05 && (n === 2 || n === 6)) { golpeRuido(t, { dur: 0.05, vol: 0.22 * capas.palmas, filtro: 'bandpass', f: 1500, q: 1.2 }); golpeRuido(t + 0.012, { dur: 0.04, vol: 0.15 * capas.palmas, filtro: 'highpass', f: 2500 }); }
       const compas = Math.floor(paso / 8) % CANTICO.acordes.length;
       if (n === 0 || n === 4) tono(t, frecuencia(CANTICO.acordes[compas][n ? 1 : 0]), 0.22, { tipo: 'triangle', vol: 0.3, s: 0.5, r: 0.05 });
       if (capas.canto !== false) tocarCantico(t, paso, 1);

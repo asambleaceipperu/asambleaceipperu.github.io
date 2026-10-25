@@ -82,23 +82,20 @@ export function guionSala(n, estado) {
   const e = estado;
   const periodos = ACTUAL.periodosPrimaria.valor;
   if (n === 1) {
+    const a = e.aulas[0];
     return [
       [0, '¿Qué tal la clase? ¿Has llegado a todos?'],
-      ['p', e.aulas[0] ? `A ${e.aulas[0].llegados} de ${e.aulas[0].total}. Y al café, frío.` : 'Al café. Frío.'],
-      [1, `Es que en Primaria damos hasta ${periodos} periodos de clase a la semana. No da tiempo a preparar nada.`],
-      [2, '¿Y Laura? No la he visto.'],
-      [0, 'Se fue en septiembre. Ya van tres este curso.'],
-      [1, 'Mañana es 14 de octubre. Empieza la huelga indefinida. ¿Vienes a la mani?'],
-      ['p', 'Tengo la camiseta verde planchada desde septiembre.'],
+      ['p', a ? `A ${a.llegados} de ${a.total}. Y al café, frío.` : 'Al café. Frío.'],
+      [1, `Es que damos hasta ${periodos} periodos de clase a la semana, sin un hueco. Pedimos 22.`],
+      [0, 'Y Laura se fue en septiembre. Ya van tres este curso.'],
+      [1, 'Mañana, 14-O, empieza la huelga indefinida. ¿Vienes a la mani?'],
     ];
   }
   const elegidas = e.elegidas.slice(0, 2);
   const lineas = [[0, '¿Qué tal hoy?']];
   elegidas.forEach((id, i) => lineas.push([i === 0 ? 'p' : 1, REIVINDICACIONES[id].sala]));
-  if (!elegidas.includes('sueldo')) lineas.push([2, 'Pues a mí me han vuelto a repartir tres niños de la clase de al lado. Sigue sin sustituto.']);
   lineas.push([1, 'La consejera dice que lo que pedimos es «inasumible».']);
-  lineas.push([2, 'Inasumible es esta fotocopiadora.']);
-  lineas.push([0, 'Esto solo ha sido un «¿y si…?». Para que pase de verdad hay que volver a la calle.']);
+  lineas.push([0, 'Inasumible es esta fotocopiadora.']);
   return lineas;
 }
 
@@ -123,6 +120,7 @@ export const COMPIS = [
 // Títulos para la tarjeta final, según cómo hayas jugado.
 export function tituloTarjeta(e) {
   if (e.huevos?.tupper >= 3) return 'Arqueología del tupper';
+  if ((e.mejorCombo || 0) >= 5) return 'Tiza infinita';
   if ((e.ritmo?.aciertos || 0) >= 0.8 * (e.ritmo?.total || 99)) return 'Megáfono de oro';
   if (e.especiales?.includes('batucada') && e.especiales?.includes('coro')) return 'Alma de la batucada';
   if ((e.mani?.max || 0) > 3000) return 'Marea imparable';
