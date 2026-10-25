@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Seguimos · Revisión de los retos</title>
+<link rel="stylesheet" href="seguimos.css">
+<style>
+  body{background:var(--papel)}
+  .rev{max-width:820px;margin:0 auto;padding:24px 16px 60px;display:grid;gap:14px}
+  .rev h1{font:800 30px var(--display);margin:0}
+  .rev .ayuda{color:var(--gris);margin:0}
+  .dia-rev{background:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 1px 0 #0f35221a;display:grid;gap:6px}
+  .dia-rev h2{font:800 19px var(--display);margin:0}
+  .dia-rev .meta{font:700 13px var(--texto);color:var(--margen);text-transform:uppercase;letter-spacing:.06em}
+  .dia-rev .sol{background:var(--suave);border-radius:10px;padding:8px 10px;font-size:15px}
+  .dia-rev p{margin:0}
+  .dia-rev details{font-size:15px}
+  .marca-revisar{display:flex;gap:8px;align-items:center;font-weight:700}
+</style></head>
+<body>
+<main class="rev">
+  <h1>Seguimos · revisión de los retos</h1>
+  <p class="ayuda">Todos los retos programados, con su solución, el texto de «Lo que hay detrás» y la fuente. Esta página no está enlazada desde la web. Los cambios se hacen en <code>seguimos/js/contenido.js</code>. Las casillas solo sirven para ir marcando en este navegador lo ya revisado.</p>
+  <div id="lista"></div>
+</main>
+<script type="module">
+  import { DIAS } from './js/contenido.js';
+  import { fechaDelDia, fechaLarga } from './js/calendario.js';
+  import { TIPOS } from './js/retos/index.js';
+  const lista = document.getElementById('lista');
+  const solucion = d => {
+    const x = d.datos;
+    switch (d.tipo) {
+      case 'palabra': return x.palabra;
+      case 'conexiones': return x.grupos.map(g => `${g.nombre}: ${g.fichas.join(', ')}`).join(' / ');
+      case 'cronologia': return x.momentos.map(m => `${m.anio} ${m.texto}`).join(' → ');
+      case 'emojis': return `${x.pistas.map(p => p.emojis || p.texto).join(' · ')} → ${x.respuesta} (opciones: ${x.opciones.join(', ')})`;
+      case 'cuantos': return `${x.pregunta} → ${x.cifra} ${x.unidad || ''}`;
+      case 'bulo': return x.afirmaciones.map(a => `${a.cierto ? 'DATO' : 'BULO'}: ${a.texto} (${a.explica})`).join(' / ');
+      case 'frase': return `${x.texto} — ${x.autor} (distractores: ${x.distractores.join(', ')})`;
+    }
+  };
+  let hechos = {};
+  try { hechos = JSON.parse(localStorage.getItem('seguimos-revision')) || {}; } catch {}
+  DIAS.forEach((d, i) => {
+    const n = i + 1;
+    const art = document.createElement('article');
+    art.className = 'dia-rev';
+    const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+    art.innerHTML = `<p class="meta">Día ${n} · ${fechaLarga(fechaDelDia(n))} · ${TIPOS[d.tipo].nombre}</p>
+      <h2>${esc(d.detras.titulo)}</h2>
+      <p class="sol"><b>Reto:</b> ${esc(solucion(d))}</p>
+      ${d.detras.texto.map(p => `<p>${esc(p)}</p>`).join('')}
+      <p><b>Fuente:</b> <a href="${d.detras.fuente.url}">${esc(d.detras.fuente.nombre)}</a></p>
+      <label class="marca-revisar"><input type="checkbox" ${hechos[n] ? 'checked' : ''}> Revisado</label>`;
+    art.querySelector('input').addEventListener('change', e => { hechos[n] = e.target.checked; try { localStorage.setItem('seguimos-revision', JSON.stringify(hechos)); } catch {} });
+    lista.append(art);
+  });
+</script>
+</body></html>
