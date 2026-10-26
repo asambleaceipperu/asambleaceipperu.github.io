@@ -1,32 +1,23 @@
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>¿Llegas a la mani? · Asamblea Docente del CEIP Perú</title>
-<meta name="description" content="Acompaña a una profe de Atocha a la Consejería esquivando la burocracia, la falta de tiempo y el agobio. Un minijuego de la huelga educativa madrileña.">
+<title>Seguimos · El reto diario de la huelga educativa · Asamblea Docente del CEIP Perú</title>
+<meta name="description" content="Un reto nuevo cada día de huelga indefinida: palabras, fechas, películas, cifras y huelgas que ganaron. Lo resuelves en dos minutos y te cuenta algo.">
+<!-- De momento es una prueba para que la asamblea la valore: fuera de buscadores y sin enlaces desde la web. -->
+<meta name="robots" content="noindex">
 <meta name="theme-color" content="#0f3522"><meta name="color-scheme" content="light">
 <link rel="canonical" href="https://asambleaceipperu.github.io/juego/">
 <meta property="og:url" content="https://asambleaceipperu.github.io/juego/">
-<meta property="og:title" content="¿Llegas a la mani?">
-<meta property="og:description" content="Acompaña a una profe de Atocha a la Consejería esquivando la burocracia, la falta de tiempo y el agobio.">
-<meta property="og:image" content="https://asambleaceipperu.github.io/juego/compartir-juego.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:title" content="Seguimos · El reto diario de la huelga educativa">
+<meta property="og:description" content="Cada día de huelga, un reto distinto. ¿Lo sacas?">
+<meta property="og:image" content="https://asambleaceipperu.github.io/juego/compartir-seguimos.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 <meta property="og:type" content="website"><meta property="og:locale" content="es_ES"><meta property="og:site_name" content="Asamblea Docente del CEIP Perú">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="../assets/simbolo.svg" type="image/svg+xml">
 <link rel="preload" href="../assets/fuentes/bricolage-grotesque.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fuentes/permanent-marker.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="estilo.css">
+<link rel="stylesheet" href="seguimos.css">
 <link rel="stylesheet" href="mani.css">
-<style>
-  /* Cabecera con el título del juego. */
-  .titular{max-width:var(--ancho);margin:10px auto 0;text-align:center}
-  .titular h1{margin:0;font:400 clamp(40px,12vw,60px)/1 var(--rotulador);color:var(--amarillo);transform:rotate(-2deg);text-shadow:4px 4px 0 #0008;text-wrap:balance}
-  .titular p{margin:8px 0 0;font:700 16px var(--texto);color:#e4eed8}
-  .mas{display:grid;gap:10px}
-  .mas h2{margin:0;font:800 20px/1.2 var(--display)}
-  .mas ul{margin:0;padding:0;list-style:none;display:grid;gap:8px}
-  .mas li a{display:block;padding:12px 14px;border-radius:12px;background:var(--suave);text-decoration:none;font-weight:700}
-  .mas li a span{display:block;font-weight:400;font-size:15px;color:var(--gris)}
-</style>
 </head>
 <body>
 <header class="cabecera">
@@ -35,38 +26,25 @@
       <svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="corro"></g></svg>
       <span><b>Asamblea Docente</b><small>del CEIP Perú</small></span>
     </a>
-    <a class="enlace-archivo" href="../huelga.html">La huelga</a>
+    <a class="enlace-archivo" href="#archivo">Días anteriores</a>
   </div>
-  <div class="titular">
-    <h1>¿Llegas a la mani?</h1>
-    <p>Acompaña a una profe de Atocha a la Consejería</p>
+  <div class="contador" id="contador" aria-live="polite">
+    <p class="titulo-juego">Seguimos</p>
+    <p class="dia"><span class="dia-palabra">Día</span> <span class="dia-num" id="dia-num">·</span></p>
+    <p class="dia-sub" id="dia-sub">de huelga indefinida</p>
   </div>
 </header>
 
 <main id="principal">
-  <div id="juego"></div>
-  <a class="vistete" href="../pedidos.html">
-    <span aria-hidden="true"><svg viewBox="0 0 48 48" width="44" height="44"><path d="M17 6 6 12l4 10 5-2v22h18V20l5 2 4-10-11-6c-1 4-4 6-7 6s-6-2-7-6Z" fill="#86cd55" stroke="#0f3522" stroke-width="2.5" stroke-linejoin="round"/></svg></span>
-    <span><b>Vístete de huelga</b>Camisetas, sudaderas y chapas. Todo va a la caja de resistencia.</span>
-    <span class="flecha" aria-hidden="true">→</span>
-  </a>
-  <section class="zona mas" aria-labelledby="mas-titulo">
-    <h2 id="mas-titulo">Fuera del juego, la huelga es de verdad</h2>
-    <ul>
-      <li><a href="../huelga.html">Por qué hacemos huelga<span>Seis reivindicaciones, explicadas con calma.</span></a></li>
-      <li><a href="../caja-resistencia.html">Caja de resistencia<span>Cada día de huelga es un día sin sueldo.</span></a></li>
-      <li><a href="../actualidad.html">Próximas movilizaciones<span>Concentraciones y manifestaciones, con fecha y lugar.</span></a></li>
-    </ul>
-  </section>
+  <section class="reto" id="reto" aria-labelledby="reto-titulo"></section>
+  <section class="detras" id="detras" hidden aria-labelledby="detras-titulo"></section>
+  <section class="archivo" id="archivo" aria-labelledby="archivo-titulo"></section>
 </main>
 
 <footer class="pie">
-  <p>Un minijuego de la <a href="../index.html">Asamblea Docente del CEIP Perú</a>, en huelga indefinida desde el 14 de octubre de 2026.</p>
+  <p>Un reto al día mientras dure la huelga. Hecho por la <a href="../index.html">Asamblea Docente del CEIP Perú</a>. <a href="../huelga.html">Por qué hacemos huelga</a> · <a href="../caja-resistencia.html">Caja de resistencia</a></p>
 </footer>
-<noscript><p class="sin-js">Este juego necesita JavaScript. Mientras tanto, lee <a href="../huelga.html">por qué hacemos huelga</a>.</p></noscript>
-<script type="module">
-  import { minijuego } from './mani.js';
-  document.getElementById('corro').innerHTML = Array.from({ length: 8 }, (_, i) => `<g transform="rotate(${i * 45})" fill="${i % 2 ? '#86cd55' : '#f7f8f3'}"><path d="M-5.5 -26.2V-45q0-2 2-2H3.5q2 0 2 2V-26.2Z"/><path d="M-5.5 -24H5.5L0 -13Z"/></g>`).join('') + '<circle r="7" fill="#86cd55"/>';
-  document.getElementById('juego').replaceWith(minijuego({ titulo: false }));
-</script>
+<div class="aviso-copia" id="aviso" role="status" aria-live="polite"></div>
+<noscript><p class="sin-js">Este reto necesita JavaScript. Mientras tanto, lee <a href="../huelga.html">por qué hacemos huelga</a>.</p></noscript>
+<script type="module" src="js/app.js"></script>
 </body></html>
