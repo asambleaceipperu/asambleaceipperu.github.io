@@ -290,13 +290,14 @@ function dibujaMani(ctx, x0, t) {
 }
 
 // ---------- El juego ----------
-export function minijuego() {
+// url: la dirección que se manda al retar a alguien; titulo: false para no pintar la cabecera (página propia).
+export function minijuego({ url = URL_JUEGO, titulo = true } = {}) {
   const lienzo = h('canvas.mani-lienzo', { 'aria-label': 'Minijuego: una profe corre hacia la mani esquivando obstáculos. Toca para saltar.', role: 'img' });
   const capaTexto = h('div.mani-capa');
   const marco = h('div.mani-marco', { tabindex: '0' }, lienzo, capaTexto);
-  const raiz = h('section.zona.mani-juego', { 'aria-labelledby': 'mani-titulo' },
-    h('p.etiqueta', {}, 'Minijuego'),
-    h('h2', { id: 'mani-titulo' }, 'Acompaña a una profe a la próxima mani'),
+  const raiz = h('section.zona.mani-juego', titulo ? { 'aria-labelledby': 'mani-titulo' } : { 'aria-label': 'Minijuego' },
+    titulo ? h('p.etiqueta', {}, 'Minijuego') : null,
+    titulo ? h('h2', { id: 'mani-titulo' }, 'Acompaña a una profe a la próxima mani') : null,
     h('p.enunciado', {}, 'De Atocha a la Consejería. Toca para saltar; si mantienes el dedo, salta más alto. Esquiva la burocracia, la falta de tiempo y el agobio. Cada chapa verde suma una compañera que te cubre de un golpe.'),
     marco);
   const ctx = lienzo.getContext('2d');
@@ -465,8 +466,8 @@ export function minijuego() {
   }
   function textoCompartir(m, llego) {
     return llego
-      ? `He llevado a una profe de Atocha a la mani de la Consejería con ${companeras.length} ${companeras.length === 1 ? 'compañera' : 'compañeras'}. ¿Llegas tú? 👉 ${URL_JUEGO}`
-      : `He acompañado a una profe ${fmt(m)} metros camino de la mani, esquivando burocracia y agobio. ¿Llegas más lejos? 👉 ${URL_JUEGO}`;
+      ? `He llevado a una profe de Atocha a la mani de la Consejería con ${companeras.length} ${companeras.length === 1 ? 'compañera' : 'compañeras'}. ¿Llegas tú? 👉 ${url}`
+      : `He acompañado a una profe ${fmt(m)} metros camino de la mani, esquivando burocracia y agobio. ¿Llegas más lejos? 👉 ${url}`;
   }
   function pantalla(titulo, texto, extra, compartir) {
     capaTexto.replaceChildren(...[
