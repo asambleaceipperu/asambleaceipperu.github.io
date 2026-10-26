@@ -237,14 +237,3 @@ main{max-width:var(--ancho);margin:0 auto;padding:18px max(16px,env(safe-area-in
 .vistete .flecha{font:800 26px var(--display);color:var(--marea)}
 .vistete:hover .flecha,.vistete:focus-visible .flecha{transform:translateX(3px)}
 .tarjeta{width:100%;max-width:420px;height:auto;justify-self:center;border-radius:14px;box-shadow:0 10px 30px #0f352233;aspect-ratio:1}
-
-/* Minijuego: acompaña a una profe a la próxima mani */
-.mani-juego .etiqueta{margin:0;font:800 13px var(--texto);letter-spacing:.08em;text-transform:uppercase;color:var(--margen)}
-.mani-marco{position:relative;border-radius:14px;overflow:hidden;touch-action:manipulation;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:pointer;box-shadow:inset 0 0 0 2px #0f35221a}
-.mani-marco:focus-visible{outline:3px solid var(--amarillo);outline-offset:2px}
-.mani-lienzo{display:block;width:100%;height:300px}
-.mani-capa{position:absolute;inset:0;display:grid;place-content:center;gap:8px;text-align:center;padding:16px;background:#f7f8f3d9;backdrop-filter:blur(2px)}
-.mani-capa p{margin:0;font-size:15px}
-.mani-capa .mani-titulo{font:400 26px/1.1 var(--rotulador);color:var(--pizarra);text-wrap:balance}
-.mani-capa .mani-extra{font-weight:700;color:var(--margen)}
-.mani-capa .botones{justify-content:center}

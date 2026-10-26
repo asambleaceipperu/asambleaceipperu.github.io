@@ -1,10 +1,23 @@
 // Minijuego: acompaña a una profe a la próxima mani, de Atocha a la Consejería.
 // Corre sola; un toque la hace saltar (si mantienes, salta más). Hay que esquivar la burocracia, la falta de
 // tiempo y el agobio. Cada chapa verde suma una compañera que corre detrás y te cubre de un golpe.
-import { h } from './dom.js';
+
+// h('button.boton', { onclick }, 'Texto', hijo...): crea un elemento sin librerías.
+function h(etiqueta, props = {}, ...hijos) {
+  const [nombre, ...clases] = etiqueta.split('.');
+  const el = document.createElement(nombre || 'div');
+  if (clases.length) el.className = clases.join(' ');
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of hijos.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return el;
+}
 
 const C = { papel: '#f7f8f3', honda: '#0f3522', pizarra: '#174d32', marea: '#86cd55', suave: '#e4eed8', amarillo: '#ffcf33', margen: '#e0566c', gris: '#9aa59c', cielo: '#eaf3e1', lejos: '#cddfc2', fachada: '#f0e6d2', fachada2: '#e8d9bd', ventana: '#9fc3b0', asfalto: '#d9dccf', bordillo: '#b9bfae', tronco: '#7d5a3c', copa: '#5fb84a', piel: ['#f6d5bd', '#d29a74', '#8a5a3c', '#eab996', '#b47a55'] };
-const URL_JUEGO = 'https://asambleaceipperu.github.io/seguimos/';
+const URL_JUEGO = 'https://asambleaceipperu.github.io/juego/';
 const PX_M = 10;
 const META = 2000; // metros hasta la Consejería
 const RUTA = [

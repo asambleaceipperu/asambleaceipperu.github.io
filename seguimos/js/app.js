@@ -126,7 +126,7 @@ function terminar(n, dia, tipo, res, nuevo) {
 // El minijuego se carga solo cuando hace falta.
 function minijuegoDiferido() {
   const hueco = h('div.mani-hueco');
-  import('./mani.js').then(m => hueco.replaceWith(m.minijuego())).catch(() => hueco.remove());
+  import('../../juego/mani.js').then(m => hueco.replaceWith(m.minijuego())).catch(() => hueco.remove());
   return hueco;
 }
 

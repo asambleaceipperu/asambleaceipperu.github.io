@@ -13,10 +13,11 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="../assets/simbolo.svg" type="image/svg+xml">
 <link rel="preload" href="../assets/fuentes/bricolage-grotesque.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="../seguimos/fuentes/permanent-marker.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="../seguimos/seguimos.css">
+<link rel="preload" href="fuentes/permanent-marker.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="estilo.css">
+<link rel="stylesheet" href="mani.css">
 <style>
-  /* Página propia del minijuego: la cabecera de «Seguimos» con el título en lugar del contador. */
+  /* Cabecera con el título del juego. */
   .titular{max-width:var(--ancho);margin:10px auto 0;text-align:center}
   .titular h1{margin:0;font:400 clamp(40px,12vw,60px)/1 var(--rotulador);color:var(--amarillo);transform:rotate(-2deg);text-shadow:4px 4px 0 #0008;text-wrap:balance}
   .titular p{margin:8px 0 0;font:700 16px var(--texto);color:#e4eed8}
@@ -34,7 +35,7 @@
       <svg viewBox="-50 -50 100 100" aria-hidden="true"><g id="corro"></g></svg>
       <span><b>Asamblea Docente</b><small>del CEIP Perú</small></span>
     </a>
-    <a class="enlace-archivo" href="../seguimos/">Reto del día</a>
+    <a class="enlace-archivo" href="../huelga.html">La huelga</a>
   </div>
   <div class="titular">
     <h1>¿Llegas a la mani?</h1>
@@ -53,7 +54,6 @@
     <h2 id="mas-titulo">Fuera del juego, la huelga es de verdad</h2>
     <ul>
       <li><a href="../huelga.html">Por qué hacemos huelga<span>Seis reivindicaciones, explicadas con calma.</span></a></li>
-      <li><a href="../seguimos/">Seguimos<span>Un reto distinto cada día de huelga.</span></a></li>
       <li><a href="../caja-resistencia.html">Caja de resistencia<span>Cada día de huelga es un día sin sueldo.</span></a></li>
       <li><a href="../actualidad.html">Próximas movilizaciones<span>Concentraciones y manifestaciones, con fecha y lugar.</span></a></li>
     </ul>
@@ -65,8 +65,8 @@
 </footer>
 <noscript><p class="sin-js">Este juego necesita JavaScript. Mientras tanto, lee <a href="../huelga.html">por qué hacemos huelga</a>.</p></noscript>
 <script type="module">
-  import { minijuego } from '../seguimos/js/mani.js';
+  import { minijuego } from './mani.js';
   document.getElementById('corro').innerHTML = Array.from({ length: 8 }, (_, i) => `<g transform="rotate(${i * 45})" fill="${i % 2 ? '#86cd55' : '#f7f8f3'}"><path d="M-5.5 -26.2V-45q0-2 2-2H3.5q2 0 2 2V-26.2Z"/><path d="M-5.5 -24H5.5L0 -13Z"/></g>`).join('') + '<circle r="7" fill="#86cd55"/>';
-  document.getElementById('juego').replaceWith(minijuego({ url: 'https://asambleaceipperu.github.io/juego/', titulo: false }));
+  document.getElementById('juego').replaceWith(minijuego({ titulo: false }));
 </script>
 </body></html>
