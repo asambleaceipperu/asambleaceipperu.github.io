@@ -55,6 +55,7 @@ if(pedidoForm){
   const vista=document.querySelector('#ped-vista');const cantidades=[...pedidoForm.querySelectorAll('input[data-producto]')];
   const euros=n=>n.toLocaleString('es-ES')+' €';
   const num=i=>Math.max(0,Math.min(50,Math.floor(+i.value||0)));
+  const MINIMO=10;
   const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Tote','Tote bags'],['Chapa','Chapas'],['Rifa','Rifa']];
   function calcular(){
     const out=[];let total=0;
@@ -74,6 +75,9 @@ if(pedidoForm){
     document.querySelector('#ped-total').textContent=euros(total);
     if(!lineas.length)p.textContent='Todavía no has elegido nada.';
     else lineas.forEach((t,k)=>{if(k)p.append(document.createElement('br'));p.append(t);});
+    let aviso=vista.querySelector('.minimo');
+    if(total>0&&total<MINIMO){if(!aviso){aviso=document.createElement('p');aviso.className='minimo';vista.append(aviso);}aviso.textContent=`La compra mínima es de ${euros(MINIMO)}: te faltan ${euros(MINIMO-total)}.`;}
+    else if(aviso)aviso.remove();
     return {lineas,total};
   }
   const recogeBox=document.querySelector('#ped-recoge-box');const recoge=document.querySelector('#ped-recoge');
@@ -85,7 +89,8 @@ if(pedidoForm){
   pedidoForm.addEventListener('submit',async ev=>{
     ev.preventDefault();
     const {lineas,total}=actualizar();
-    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una tote bag, una chapa o una participación.';return;}
+    if(!lineas.length){estado.textContent='Elige al menos una camiseta, una sudadera, una tote bag o unas chapas.';return;}
+    if(total<MINIMO){estado.textContent=`La compra mínima es de ${euros(MINIMO)}. Te faltan ${euros(MINIMO-total)}: añade algo más a tu reserva.`;return;}
     const radio=pedidoForm.querySelector('input[name="recogida"]');
     if(radio&&!recogida()){radio.reportValidity();estado.textContent='Elige cómo vas a recogerlo.';return;}
     if(recoge&&recoge.required&&!recoge.value.trim()){recoge.value='';recoge.reportValidity();return;}
