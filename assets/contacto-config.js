@@ -9,7 +9,5 @@ window.ASAMBLEA_CONTACTO = {
   privacidadRevisada: true,
   // Dirección de la aplicación web de Google Apps Script que guarda los pedidos en la hoja (https://script.google.com/macros/s/…/exec).
   // Mientras esté vacía, los pedidos se envían por Formspree al correo de la asamblea.
-  pedidos: 'https://script.google.com/macros/s/AKfycbycxG14WAaR7v4gDxn-5w7N18s82rj-iiq7uP9ybl3IchtmRioTMNRPejAaRvLqrFTd/exec',
-  // Feed de Instagram de Behold (https://feeds.behold.so/…). Vacío: la web muestra sus propias imágenes en el bloque de Instagram.
-  instagramFeed: ''
+  pedidos: 'https://script.google.com/macros/s/AKfycbycxG14WAaR7v4gDxn-5w7N18s82rj-iiq7uP9ybl3IchtmRioTMNRPejAaRvLqrFTd/exec'
 };

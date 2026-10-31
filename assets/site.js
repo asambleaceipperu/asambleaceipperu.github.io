@@ -122,21 +122,12 @@ if(pedidoForm){
   actualizar();
 }
 
-/* Instagram: si hay un feed de Behold configurado, muestra las últimas publicaciones; si no, se quedan las imágenes de la web. */
-(function(){
-  const feed=document.querySelector('[data-ig-feed]');
-  const url=(window.ASAMBLEA_CONTACTO||{}).instagramFeed;
-  if(!feed||typeof url!=='string'||!/^https:\/\/feeds\.behold\.so\/[A-Za-z0-9_-]+$/.test(url))return;
-  fetch(url).then(r=>r.ok?r.json():Promise.reject()).then(d=>{
-    const posts=(Array.isArray(d)?d:(d.posts||[])).slice(0,6);
-    const seguro=u=>typeof u==='string'&&/^https:\/\//.test(u)?u:'';
-    const items=posts.map(p=>{
-      const img=seguro(((p.sizes||{}).medium||{}).mediaUrl)||seguro(p.thumbnailUrl)||seguro(p.mediaUrl);
-      const link=seguro(p.permalink);if(!img||!link)return null;
-      const a=document.createElement('a');a.className='ig-post';a.href=link;a.rel='noopener';
-      const im=document.createElement('img');im.src=img;im.loading='lazy';
-      im.alt=(p.altText||p.prunedCaption||p.caption||'Publicación de la asamblea en Instagram').slice(0,140);
-      a.append(im);return a;}).filter(Boolean);
-    if(items.length>=3)feed.replaceChildren(...items);
-  }).catch(()=>{});
-})();
+/* Instagram: el perfil se inserta solo cuando la persona lo pide (así no se carga nada de Meta sin pulsar). */
+document.querySelectorAll('[data-ig-cargar]').forEach(boton=>boton.addEventListener('click',()=>{
+  const url=boton.dataset.igCargar;const feed=document.querySelector('[data-ig-feed]');if(!feed||!/^https:\/\/www\.instagram\.com\/[\w.]+\/$/.test(url))return;
+  const bq=document.createElement('blockquote');bq.className='instagram-media';bq.dataset.instgrmPermalink=url;bq.dataset.instgrmVersion='14';
+  const a=document.createElement('a');a.href=url;a.rel='noopener';a.textContent='Ver nuestras publicaciones en Instagram';bq.append(a);
+  feed.classList.add('ig-embed');feed.replaceChildren(bq);boton.closest('.ig-cargar').remove();
+  if(window.instgrm&&window.instgrm.Embeds)window.instgrm.Embeds.process();
+  else{const sc=document.createElement('script');sc.async=true;sc.src='https://www.instagram.com/embed.js';document.body.append(sc);}
+}));
