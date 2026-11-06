@@ -56,7 +56,7 @@ if(pedidoForm){
   const euros=n=>n.toLocaleString('es-ES')+' €';
   const num=i=>Math.max(0,Math.min(50,Math.floor(+i.value||0)));
   const MINIMO=10;
-  const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Tote','Tote bags'],['Chapa','Chapas'],['Rifa','Rifa']];
+  const GRUPOS=[['Camiseta','Camisetas'],['Sudadera','Sudaderas'],['Tote','Tote bags'],['Braga','Bragas polares'],['Chapa','Chapas'],['Rifa','Rifa']];
   function calcular(){
     const out=[];let total=0;
     for(const [prod,nombre] of GRUPOS){
